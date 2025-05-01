@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SZAG Teremfoglaló (Auth Nélkül)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Stílusok (változatlan) */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb { background: #888; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #555; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .spinner { border: 4px solid rgba(0, 0, 0, 0.1); width: 36px; height: 36px; border-radius: 50%; border-left-color: #4f46e5; animation: spin 1s linear infinite; }
+        .modal-enter { opacity: 0; transform: scale(0.95); }
+        .modal-enter-active { opacity: 1; transform: scale(1); transition: opacity 300ms, transform 300ms; }
+        .modal-leave { opacity: 1; transform: scale(1); }
+        .modal-leave-active { opacity: 0; transform: scale(0.95); transition: opacity 300ms, transform 300ms; }
+        .hidden { display: none; }
+        #admin-action-overlay { position: absolute; inset: 0; background-color: rgba(255, 255, 255, 0.75); display: flex; justify-content: center; align-items: center; z-index: 20; }
+        #admin-action-overlay .spinner { width: 24px; height: 24px; }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans">
+
+    <header id="app-header" class="bg-indigo-600 text-white p-4 shadow-md sticky top-0 z-30">
+        <div class="container mx-auto flex flex-wrap justify-between items-center gap-y-2">
+            <h1 class="text-xl font-bold cursor-pointer" onclick="navigateTo('#/')">SZAG Teremfoglaló</h1>
+            <nav class="flex items-center space-x-2 sm:space-x-4">
+                <div id="nav-links" class="flex items-center space-x-2 sm:space-x-4"></div>
+                <div id="user-status" class="flex items-center space-x-2">
+                    <span class="text-sm text-yellow-300">(Teszt Mód - Admin)</span>
+                </div>
+            </nav>
+        </div>
+    </header>
+
+    <main id="main-content" class="container mx-auto mt-4 pb-16">
+        <div id="loading-view" class="flex flex-col justify-center items-center h-64 text-xl text-gray-600">
+            <div class="spinner mb-4"></div>
+            <p>Adatok betöltése...</p>
+        </div>
+        <div id="error-view" class="hidden p-4 text-center text-red-700 bg-red-100 rounded-lg"></div>
+        <div id="weekly-view" class="hidden"></div>
+        <div id="daily-summary-view" class="hidden"></div>
+        <div id="room-view" class="hidden"></div>
+        <div id="admin-view" class="hidden"></div>
+    </main>
+
+    <div id="booking-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4 modal-enter">
+        <div class="bg-white p-6 rounded-lg shadow-xl w-full max-w-md">
+            <h3 class="text-xl font-bold mb-4 text-indigo-700">Teremfoglalás</h3>
+            <div class="space-y-3 mb-4 text-gray-700">
+                <p><span class="font-semibold">Terem:</span> <span id="modal-room-name"></span></p>
+                <p><span class="font-semibold">Nap:</span> <span id="modal-day"></span></p>
+                <p><span class="font-semibold">Idősáv:</span> <span id="modal-timeslot"></span></p>
+            </div>
+            <div class="mb-4">
+                <label for="bookingUser" class="block text-sm font-medium text-gray-700 mb-1">Foglaló neve / Foglalás célja:</label>
+                <input type="text" id="bookingUser" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" placeholder="Pl. Teszt Felhasználó / Teszt Óra">
+            </div>
+            <div id="modal-recurring-option" class="mb-4">
+                <label class="flex items-center space-x-2 cursor-pointer">
+                    <input type="checkbox" id="modal-is-recurring" class="rounded border-gray-300 text-indigo-600 shadow-sm focus:ring-indigo-500">
+                    <span class="text-sm text-gray-700">Rendszeres foglalás (minden héten)</span>
+                </label>
+            </div>
+            <div class="flex justify-end space-x-3">
+                <button id="modal-cancel-button" class="px-4 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition duration-150">Mégse</button>
+                <button id="modal-confirm-button" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition duration-150 flex items-center">
+                    <span id="modal-confirm-text">Foglalás Mentése</span>
+                     <svg id="modal-spinner" class="hidden animate-spin ml-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <footer class="text-center text-gray-500 text-sm py-4 mt-8">
+        SZAG Teremfoglaló &copy; <span id="current-year"></span>
+    </footer>
+
+    <script src="https://www.gstatic.com/firebasejs/9.15.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.15.0/firebase-firestore-compat.js"></script>
+
+    <script>
+        // --- Firebase Konfiguráció ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyAs8pqCdCnyFDRivyUJJPh9nc0R1yNCAys", // <- CSERÉLD LE!
+            authDomain: "teremfoglalo-913e0.firebaseapp.com", // <- CSERÉLD LE!
+            projectId: "teremfoglalo-913e0", // <- CSERÉLD LE!
+            storageBucket: "teremfoglalo-913e0.firebasestorage.app", // <- CSERÉLD LE!
+            messagingSenderId: "705982282868", // <- CSERÉLD LE!
+            appId: "1:705982282868:web:183b3c35161ee0bffce521" // <- CSERÉLD LE!
+        };
+
+        // --- Globális Változók ---
+        let firebaseApp;
+        let firestore;
+        const currentUser = { uid: "TEST_ADMIN_USER", displayName: "Teszt Admin", email: "admin@teszt.hu", isAdmin: true };
+        let rooms = [];
+        let timeSlots = [];
+        let bookings = [];
+        let allowedUsers = []; // Bár nincs auth, az admin felülethez kellhet
+        let currentView = 'loading';
+        let currentRoomId = null;
+        let unsubscribeListeners = [];
+        const STATIC_DAYS = ['Hétfő', 'Kedd', 'Szerda', 'Csütörtök', 'Péntek'];
+        let initialDataLoaded = false; // Egyszerűsített flag
+
+        // --- DOM Elemek Referenciái ---
+        const loadingView = document.getElementById('loading-view');
+        const errorView = document.getElementById('error-view');
+        const weeklyViewDiv = document.getElementById('weekly-view');
+        const dailySummaryViewDiv = document.getElementById('daily-summary-view');
+        const roomViewDiv = document.getElementById('room-view');
+        const adminViewDiv = document.getElementById('admin-view');
+        const userStatusDiv = document.getElementById('user-status');
+        const navLinksDiv = document.getElementById('nav-links');
+        const mainContent = document.getElementById('main-content');
+        const bookingModal = document.getElementById('booking-modal');
+        const modalRoomName = document.getElementById('modal-room-name');
+        const modalDay = document.getElementById('modal-day');
+        const modalTimeslot = document.getElementById('modal-timeslot');
+        const modalBookingUserInput = document.getElementById('bookingUser');
+        const modalRecurringOptionDiv = document.getElementById('modal-recurring-option');
+        const modalIsRecurringCheckbox = document.getElementById('modal-is-recurring');
+        const modalCancelButton = document.getElementById('modal-cancel-button');
+        const modalConfirmButton = document.getElementById('modal-confirm-button');
+        const modalConfirmText = document.getElementById('modal-confirm-text');
+        const modalSpinner = document.getElementById('modal-spinner');
+
+        // --- Inicializálás ---
+        function initializeApp() {
+            console.log("initializeApp() called (No Auth)");
+            try {
+                if (!firebaseConfig || !firebaseConfig.apiKey) throw new Error("Firebase konfiguráció hiányzik.");
+                firebaseApp = firebase.initializeApp(firebaseConfig);
+                firestore = firebase.firestore();
+                console.log("Firebase (App, Firestore) sikeresen inicializálva.");
+                setupEventListeners();
+                document.getElementById('current-year').textContent = new Date().getFullYear();
+                updateUIBasedOnAuthState(currentUser); // UI frissítése a mock userrel
+                setupFirestoreListeners(); // Listenerek indítása
+                // A handleRouteChange-t a listenerek hívják meg, miután az adatok megérkeztek
+            } catch (error) {
+                console.error("Firebase inicializálási hiba:", error);
+                showError(`Firebase inicializálása sikertelen: ${error.message}.`);
+            }
+        }
+
+        // --- Nézetváltás ---
+        function switchView(viewId, roomId = null) {
+            console.log(`Switching view to: ${viewId}`, roomId ? `with roomId: ${roomId}` : '');
+            currentView = viewId;
+            currentRoomId = roomId;
+
+            [loadingView, errorView, weeklyViewDiv, dailySummaryViewDiv, roomViewDiv, adminViewDiv]
+                .forEach(el => el?.classList.add('hidden')); // Add null check for safety
+
+            const viewElement = document.getElementById(`${viewId}-view`);
+            if (viewElement) {
+                viewElement.classList.remove('hidden');
+                if (viewId !== 'loading' && viewId !== 'error') {
+                    console.log(`Rendering view: ${viewId}`);
+                    renderView();
+                }
+            } else {
+                console.error(`View element not found: ${viewId}-view`);
+                showError(`A kért nézet (${viewId}) nem található.`);
+            }
+            updateNavLinks();
+        }
+
+        // --- Útvonal Kezelés ---
+        function handleRouteChange() {
+            console.log(">>> handleRouteChange() called (No Auth)");
+            const hash = window.location.hash || '#/';
+            console.log("Current hash:", hash);
+
+            // Ha még töltődnek az adatok, vagy hiba van, ne váltsunk nézetet
+            if (!initialDataLoaded || currentView === 'error') {
+                 console.log("Routing skipped (initial data not loaded or error state)");
+                 return;
+            }
+
+            let targetView = '';
+            let targetRoomId = null;
+
+            if (hash === '#/') targetView = 'weekly';
+            else if (hash === '#/view') targetView = 'daily-summary';
+            else if (hash.startsWith('#/room?id=')) {
+                targetRoomId = hash.split('=')[1];
+                targetView = 'room';
+            } else if (hash === '#/admin') {
+                targetView = 'admin'; // Mindig elérhető
+            } else {
+                targetView = 'weekly';
+                if (window.location.hash !== '#/') navigateTo('#/');
+            }
+
+            if (targetView !== currentView || (targetView === 'room' && targetRoomId !== currentRoomId)) {
+                 console.log("Routing: Switching to target view:", targetView);
+                 switchView(targetView, targetRoomId);
+            } else {
+                 console.log("Routing: View already set to", targetView);
+                 renderView(); // Újrarajzolás F5 után is
+            }
+        }
+
+        function navigateTo(hash) {
+            console.log("Navigating to:", hash);
+            if(window.location.hash === hash && initialDataLoaded) return; // Ne navigálj feleslegesen
+            window.location.hash = hash;
+        }
+
+        // --- Hiba Megjelenítés ---
+        function showError(message) {
+            console.error("Showing error:", message);
+            errorView.textContent = `Hiba: ${message}`;
+            [loadingView, weeklyViewDiv, dailySummaryViewDiv, roomViewDiv, adminViewDiv]
+                .forEach(el => el?.classList.add('hidden'));
+            errorView.classList.remove('hidden');
+            currentView = 'error';
+            initialDataLoaded = true; // Hiba esetén is befejezettnek tekintjük a betöltést
+        }
+
+        // --- Felhasználói Felület Frissítése ---
+        function updateUIBasedOnAuthState(user) {
+             console.log("updateUIBasedOnAuthState called (No Auth) with user:", user ? user.uid : null);
+             updateNavLinks();
+        }
+
+        function updateNavLinks() {
+            // (Változatlan)
+            let linksHtml = `
+                <button onclick="navigateTo('#/')" class="hover:bg-indigo-700 px-2 py-1 sm:px-3 rounded text-sm sm:text-base ${currentView === 'weekly' ? 'bg-indigo-800 font-semibold' : ''}">Heti nézet</button>
+                <button onclick="navigateTo('#/view')" class="hover:bg-indigo-700 px-2 py-1 sm:px-3 rounded text-sm sm:text-base ${currentView === 'daily-summary' ? 'bg-indigo-800 font-semibold' : ''}">Napi összesítő</button>
+                <button onclick="navigateTo('#/admin')" class="hover:bg-purple-700 px-2 py-1 sm:px-3 rounded text-sm sm:text-base ${currentView === 'admin' ? 'bg-purple-800 font-semibold' : 'bg-purple-600'}">Admin</button>
+            `;
+            navLinksDiv.innerHTML = linksHtml;
+        }
+
+
+        // --- Renderelő Függvények ---
+        function renderView() {
+             // Nincs szükség currentUser ellenőrzésre itt
+            console.log(`Attempting to render view: ${currentView}`);
+            // Győződjünk meg róla, hogy a loading/error nézet el van rejtve, ha mást renderelünk
+            if (currentView !== 'loading' && currentView !== 'error') {
+                loadingView.classList.add('hidden');
+                errorView.classList.add('hidden');
+            } else {
+                return; // Ne rendereljünk mást, ha loading vagy error van
+            }
+
+            try {
+                switch (currentView) {
+                    case 'weekly': renderWeeklyView(); break;
+                    case 'daily-summary': renderDailySummaryView(); break;
+                    case 'room': renderRoomView(); break;
+                    case 'admin': renderAdminView(); break;
+                    default:
+                        console.warn("Unknown view to render:", currentView);
+                        navigateTo('#/'); // Vissza a főoldalra ismeretlen nézet esetén
+                }
+            } catch (error) {
+                console.error(`Error rendering view ${currentView}:`, error);
+                showError(`Hiba történt a(z) ${currentView} nézet megjelenítésekor: ${error.message}`);
+            }
+        }
+
+        // --- Heti, Napi, Szoba, Admin Nézet Renderelése ---
+        // (Ezek a függvények változatlanok a korábbi "Teljes Funkciókkal" verzióhoz képest,
+        // csak a currentUser ellenőrzések feleslegesek bennük, de nem ártanak)
+        function renderWeeklyView() { /* ... kód ... */
+            console.log("Rendering Weekly View (No Auth)...");
+            weeklyViewDiv.innerHTML = ''; // Clear previous content
+
+            const sortedTimeSlots = [...timeSlots].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+            const sortedRooms = [...rooms].sort((a, b) => a.name.localeCompare(b.name));
+            const days = STATIC_DAYS; // Használjuk a statikus napokat
+
+            let tableHTML = `
+                <h2 class="text-2xl font-bold mb-4 text-center text-gray-800">Heti Teremfoglalások</h2>
+                <div class="overflow-x-auto shadow-md rounded-lg border border-gray-200">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-100">
+                            <tr>
+                                <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky left-0 bg-gray-100 z-10 border-r">Idő / Nap</th>
+                                ${days.map(day => `<th class="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap border-l">${day}</th>`).join('')}
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            ${sortedTimeSlots.map(slot => `
+                                <tr class="divide-x divide-gray-100">
+                                    <td class="px-3 py-4 whitespace-nowrap font-medium text-gray-900 sticky left-0 bg-white z-10 border-r">${escapeHtml(slot.value)}</td>
+                                    ${days.map(day => `
+                                        <td class="px-2 py-2 whitespace-nowrap text-sm text-gray-500 align-top">
+                                            <ul class="space-y-1">
+                                                ${sortedRooms.map(room => {
+                                                    const booking = bookings.find(b => b.roomId === room.id && b.day === day && b.timeSlot === slot.value);
+                                                    const isBooked = !!booking;
+                                                    // A canDelete mindig igaz lesz, mert a mock user admin
+                                                    const canDelete = booking;
+                                                    return `
+                                                        <li class="flex items-center space-x-1.5 text-xs group relative">
+                                                            <span class="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0 ${isBooked ? 'bg-red-500' : 'bg-green-500'}" title="${isBooked ? 'Foglalt' : 'Szabad'}"></span>
+                                                            <span class="flex-grow overflow-hidden overflow-ellipsis whitespace-nowrap ${isBooked ? 'text-gray-700' : 'text-gray-500'}">
+                                                                ${escapeHtml(room.name)}
+                                                                ${isBooked ? `<span class="text-red-700 font-medium"> (${escapeHtml(booking.user?.split(' ')[0] || '')}${booking.type === 'recurring' ? ' R' : ''})</span>` : ''}
+                                                            </span>
+                                                            ${!isBooked ? `
+                                                                <button
+                                                                    onclick="openBookingModal('${room.id}', '${escapeJsString(room.name)}', '${day}', '${escapeJsString(slot.value)}')"
+                                                                    class="ml-auto text-indigo-600 hover:text-indigo-900 text-[10px] font-semibold px-1 py-0.5 rounded hover:bg-indigo-50 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                                    title="Foglalás: ${escapeHtml(room.name)}, ${day}, ${escapeHtml(slot.value)}">
+                                                                    Foglal
+                                                                </button>
+                                                            ` : ''}
+                                                            ${isBooked && canDelete ? `
+                                                                <button
+                                                                    onclick="deleteBooking('${booking.id}', '${escapeJsString(room.name)}', '${day}', '${escapeJsString(slot.value)}', '${escapeJsString(booking.user)}')"
+                                                                    class="ml-1 text-red-500 hover:text-red-800 text-[10px] font-semibold px-1 py-0.5 rounded hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                                    title="Foglalás Törlése">
+                                                                    X
+                                                                </button>
+                                                            ` : ''}
+                                                        </li>
+                                                    `;
+                                                }).join('')}
+                                            </ul>
+                                        </td>
+                                    `).join('')}
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+            weeklyViewDiv.innerHTML = tableHTML;
+        }
+        function renderDailySummaryView() {
+             console.log("Rendering Daily Summary View (No Auth)...");
+             dailySummaryViewDiv.innerHTML = '';
+
+             const today = getTodayDayName();
+             const currentTime = new Date().toLocaleTimeString('hu-HU', { hour: '2-digit', minute: '2-digit' });
+
+             const todayBookings = bookings
+                .filter(b => b.day === today)
+                .sort((a, b) => {
+                    const roomA = rooms.find(r => r.id === a.roomId)?.name || a.roomId;
+                    const roomB = rooms.find(r => r.id === b.roomId)?.name || b.roomId;
+                    if (roomA !== roomB) return roomA.localeCompare(roomB);
+                    return (a.timeSlot || "").localeCompare(b.timeSlot || "");
+                });
+
+            let summaryHTML = `
+                <h2 class="text-2xl font-bold mb-4 text-center text-gray-800">Mai Teremfoglalások (${today})</h2>
+                <p class="text-center text-gray-600 mb-4">Jelenlegi idő: ${currentTime}</p>
+            `;
+
+            if (todayBookings.length === 0) {
+                summaryHTML += `<p class="text-center text-gray-500 mt-8">Ma nincsenek foglalások.</p>`;
+            } else {
+                summaryHTML += `<div class="space-y-4">`;
+                const sortedRooms = [...rooms].sort((a, b) => a.name.localeCompare(b.name));
+                sortedRooms.forEach(room => {
+                    const roomBookings = todayBookings.filter(b => b.roomId === room.id);
+                    if (roomBookings.length > 0) {
+                        summaryHTML += `
+                            <div class="bg-white p-4 rounded-lg shadow">
+                                <h3 class="text-lg font-semibold mb-2 text-indigo-700">${escapeHtml(room.name)}</h3>
+                                <ul class="divide-y divide-gray-200">
+                                    ${roomBookings.map(booking => `
+                                        <li class="py-2 flex justify-between items-center">
+                                            <div>
+                                                <span class="font-medium text-gray-800">${escapeHtml(booking.timeSlot)}</span>
+                                                <span class="ml-2 text-gray-600"> - ${escapeHtml(booking.user)}</span>
+                                            </div>
+                                            <span class="text-xs px-2 py-0.5 rounded-full ${booking.type === 'recurring' ? 'bg-yellow-200 text-yellow-800' : 'bg-green-200 text-green-800'}">
+                                                ${booking.type === 'recurring' ? 'Rendszeres' : 'Egyszeri'}
+                                            </span>
+                                        </li>
+                                    `).join('')}
+                                </ul>
+                            </div>
+                        `;
+                    }
+                });
+                summaryHTML += `</div>`;
+            }
+            dailySummaryViewDiv.innerHTML = summaryHTML;
+        }
+        function renderRoomView() {
+            if (!currentRoomId) return showError("Nincs kiválasztott szoba ID.");
+            const room = rooms.find(r => r.id === currentRoomId);
+            if (!room) return showError(`A(z) ${currentRoomId} ID-jű szoba nem található.`);
+
+            console.log(`Rendering Room View for: ${room.name} (No Auth)`);
+            roomViewDiv.innerHTML = '';
+
+            const today = getTodayDayName();
+            const sortedTimeSlots = [...timeSlots].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+            const currentTimeSlotValue = getCurrentTimeSlot(timeSlots);
+            const roomBookingsToday = bookings
+                .filter(b => b.roomId === room.id && b.day === today)
+                .sort((a, b) => (a.timeSlot || "").localeCompare(b.timeSlot || ""));
+
+            let roomHTML = `<h2 class="text-3xl md:text-4xl font-bold mb-6 text-center text-indigo-800">${escapeHtml(room.name)} - Mai Beosztás (${today})</h2>`;
+            if (sortedTimeSlots.length === 0) {
+                 roomHTML += `<p class="text-center text-gray-500 mt-10 text-lg">Nincsenek elérhető idősávok.</p>`;
+            } else {
+                roomHTML += `<ul class="space-y-3">`;
+                let hasBookingsToday = roomBookingsToday.length > 0;
+                sortedTimeSlots.forEach(slot => {
+                     const booking = roomBookingsToday.find(b => b.timeSlot === slot.value);
+                     const isActive = slot.value === currentTimeSlotValue;
+                     roomHTML += `<li class="p-4 md:p-6 rounded-lg shadow transition-all duration-300 ease-in-out ${isActive ? (booking ? 'bg-green-200 border-l-4 border-green-600 scale-105 ring-2 ring-green-300' : 'bg-gray-300 border-l-4 border-gray-500 scale-105') : (booking ? 'bg-white border-l-4 border-blue-500' : 'bg-gray-100 border-l-4 border-gray-400')}"><div class="flex flex-col md:flex-row justify-between items-start md:items-center ${isActive ? 'space-y-2 md:space-y-0' : ''}"><div class="${isActive ? 'flex-grow' : ''}"><span class="font-bold block text-lg md:text-xl ${isActive ? (booking ? 'text-green-900' : 'text-gray-700') : (booking ? 'text-gray-800' : 'text-gray-500')}">${escapeHtml(slot.value)}</span>${booking ? `<span class="block text-base md:text-lg ${isActive ? 'text-green-800 font-semibold' : 'text-gray-600'}">Foglalta: ${escapeHtml(booking.user)}</span>` : `<span class="text-sm ${isActive ? 'text-gray-600 font-semibold' : 'text-gray-400'}">${isActive ? 'Szabad (Most)' : 'Szabad'}</span>`}</div>${booking ? `<span class="mt-2 md:mt-0 text-xs px-3 py-1 rounded-full self-start md:self-center ${isActive ? (booking.type === 'recurring' ? 'bg-yellow-300 text-yellow-900' : 'bg-blue-300 text-blue-900') : (booking.type === 'recurring' ? 'bg-yellow-100 text-yellow-800' : 'bg-blue-100 text-blue-800')}">${booking.type === 'recurring' ? 'Rendszeres' : 'Egyszeri'}${isActive ? ' (Most zajlik)' : ''}</span>` : ''}</div>${isActive && booking ? `<p class="mt-2 text-sm text-green-700">Ez a foglalás jelenleg aktív.</p>` : ''}</li>`;
+                });
+                roomHTML += `</ul>`;
+                if (sortedTimeSlots.length > 0 && !hasBookingsToday) {
+                     roomHTML += `<p class="text-center text-gray-500 mt-10 text-lg">Ma nincs foglalás.</p>`;
+                }
+            }
+            roomViewDiv.innerHTML = roomHTML;
+        }
+        function renderAdminView() {
+            console.log("Rendering Admin View (No Auth)...");
+            adminViewDiv.innerHTML = '';
+            const nextOrder = timeSlots.length > 0 ? Math.max(0, ...timeSlots.map(ts => ts.order ?? 0)) + 1 : 0;
+            let adminHTML = `<div class="p-4 md:p-6 bg-white rounded-lg shadow space-y-8 relative"><div id="admin-action-overlay" class="hidden"></div><h2 class="text-2xl font-bold text-center text-indigo-700">Adminisztrációs Felület (Teszt Mód)</h2><section><h3 class="text-xl font-semibold mb-3 text-gray-800 border-b pb-2">Termek Kezelése</h3><ul id="admin-rooms-list" class="space-y-2 mb-4 max-h-60 overflow-y-auto border rounded p-2">${rooms.length === 0 ? '<li class="text-gray-500 italic">Nincsenek termek.</li>' : [...rooms].sort((a, b) => a.name.localeCompare(b.name)).map(room => `<li data-id="${room.id}" class="flex justify-between items-center p-2 border-b last:border-b-0"><span>${escapeHtml(room.name)}</span><button data-action="delete-room" class="admin-action-button text-red-600 hover:text-red-800 text-sm font-semibold px-2 py-1 rounded hover:bg-red-50">Törlés</button></li>`).join('')}</ul><div class="flex items-end space-x-2"><div class="flex-grow"><label for="newRoomName" class="block text-sm font-medium text-gray-700 mb-1">Új terem neve:</label><input type="text" id="newRoomName" class="admin-input w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" placeholder="Pl. Fizika Szertár"></div><button id="add-room-button" class="admin-action-button px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition duration-150 h-10">Hozzáad</button></div></section><section><h3 class="text-xl font-semibold mb-3 text-gray-800 border-b pb-2">Idősávok Kezelése</h3><ul id="admin-timeslots-list" class="space-y-2 mb-4 max-h-60 overflow-y-auto border rounded p-2">${timeSlots.length === 0 ? '<li class="text-gray-500 italic">Nincsenek idősávok.</li>' : [...timeSlots].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map(slot => `<li data-id="${slot.id}" class="flex justify-between items-center p-2 border-b last:border-b-0"><span>${escapeHtml(slot.value)} (Sorrend: ${slot.order ?? 'N/A'})</span><button data-action="delete-timeslot" class="admin-action-button text-red-600 hover:text-red-800 text-sm font-semibold px-2 py-1 rounded hover:bg-red-50">Törlés</button></li>`).join('')}</ul><div class="flex items-end space-x-2"><div class="flex-grow"><label for="newTimeSlotValue" class="block text-sm font-medium text-gray-700 mb-1">Új idősáv (óó:pp - óó:pp):</label><input type="text" id="newTimeSlotValue" class="admin-input w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" placeholder="Pl. 16:00 - 16:45"></div><div class="w-20"><label for="newTimeSlotOrder" class="block text-sm font-medium text-gray-700 mb-1">Sorrend:</label><input type="number" id="newTimeSlotOrder" value="${nextOrder}" class="admin-input w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" placeholder="0" min="0"></div><button id="add-timeslot-button" class="admin-action-button px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition duration-150 h-10">Hozzáad</button></div></section><section><h3 class="text-xl font-semibold mb-3 text-gray-800 border-b pb-2">Engedélyezett Felhasználók Kezelése (Teszt módban nem releváns)</h3><p class="text-sm text-gray-500 italic">A felhasználók kezelése hitelesítést igényel.</p></section></div>`;
+            adminViewDiv.innerHTML = adminHTML;
+            adminViewDiv.removeEventListener('click', handleAdminActions);
+            adminViewDiv.addEventListener('click', handleAdminActions);
+        }
+
+        // --- Segédfüggvények ---
+        function escapeHtml(unsafe) { /* ... */ return unsafe ? unsafe.toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;") : ''; }
+        function escapeJsString(unsafe) { /* ... */ return unsafe ? unsafe.toString().replace(/'/g, "\\'").replace(/"/g, '\\"').replace(/\n/g, '\\n') : '';}
+
+
+        // --- Firestore Listenerek ---
+        function setupFirestoreListeners() {
+            if (!firestore) {
+                 console.log("Skipping Firestore listeners: no firestore.");
+                 return;
+            }
+            console.log("Setting up Firestore listeners (No Auth)...");
+            unsubscribeFirestoreListeners();
+            // JAVÍTVA: Egyszerűbb flag a betöltés jelzésére
+            initialDataLoaded = false;
+            let listenersPending = 3; // rooms, timeSlots, bookings
+
+            function checkAllLoaded() {
+                listenersPending--;
+                console.log(`Listener responded. Pending: ${listenersPending}`);
+                if (listenersPending <= 0 && !initialDataLoaded) {
+                    console.log("All initial Firestore data loaded or errored.");
+                    initialDataLoaded = true;
+                    // A loading view elrejtése és a routing indítása
+                    loadingView.classList.add('hidden');
+                    handleRouteChange(); // Kezdeti útvonal beállítása az adatok után
+                }
+            }
+
+            try {
+                const roomsRef = firestore.collection('rooms').orderBy('name');
+                const unsubRooms = roomsRef.onSnapshot((snapshot) => {
+                    rooms = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    console.log("Rooms updated:", rooms.length, rooms); // Log data
+                    checkAllLoaded();
+                    if (initialDataLoaded) renderView(); // Csak akkor renderelj, ha már betöltött
+                }, (error) => { console.error("Error fetching rooms:", error); showError("Hiba a termek betöltésekor."); checkAllLoaded(); });
+                unsubscribeListeners.push(unsubRooms);
+
+                const timeSlotsRef = firestore.collection('timeSlots').orderBy('order', 'asc');
+                 const unsubTimeSlots = timeSlotsRef.onSnapshot((snapshot) => {
+                    timeSlots = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    console.log("Time slots updated:", timeSlots.length, timeSlots); // Log data
+                    checkAllLoaded();
+                    if (initialDataLoaded) renderView();
+                }, (error) => { console.error("Error fetching time slots:", error); showError("Hiba az idősávok betöltésekor."); checkAllLoaded(); });
+                unsubscribeListeners.push(unsubTimeSlots);
+
+                const bookingsRef = firestore.collection('bookings');
+                 const unsubBookings = bookingsRef.onSnapshot((snapshot) => {
+                    bookings = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    console.log("Bookings updated:", bookings.length, bookings); // Log data
+                    checkAllLoaded();
+                    if (initialDataLoaded) renderView();
+                }, (error) => { console.error("Error fetching bookings:", error); showError("Hiba a foglalások betöltésekor."); checkAllLoaded(); });
+                unsubscribeListeners.push(unsubBookings);
+
+            } catch (error) {
+                 console.error("Error setting up Firestore listeners:", error);
+                 showError("Hiba az adatbázis figyelőinek beállításakor.");
+                 // Hiba esetén is jelezzük, hogy a betöltés véget ért (sikertelenül)
+                 listenersPending = 0;
+                 checkAllLoaded();
+            }
+        }
+
+        function unsubscribeFirestoreListeners() {
+            // (Változatlan)
+            console.log(`Unsubscribing ${unsubscribeListeners.length} listeners.`);
+            unsubscribeListeners.forEach(unsub => unsub());
+            unsubscribeListeners = [];
+        }
+
+        // --- Foglalási Modal Műveletek ---
+        let bookingDataForModal = {};
+        function openBookingModal(roomId, roomName, day, timeSlot) { /* ... (Változatlan) ... */
+            if (!currentUser) return alert("Bejelentkezés szükséges."); // Bár nincs auth, ez maradhat
+            bookingDataForModal = { roomId, day, timeSlot };
+            modalRoomName.textContent = roomName;
+            modalDay.textContent = day;
+            modalTimeslot.textContent = timeSlot;
+            modalBookingUserInput.value = currentUser.displayName || 'Teszt Foglaló';
+            modalIsRecurringCheckbox.checked = false;
+            modalRecurringOptionDiv.classList.remove('hidden'); // Mindig látszik teszt módban
+            bookingModal.classList.remove('hidden', 'modal-leave-active');
+            requestAnimationFrame(() => {
+                bookingModal.classList.add('modal-enter-active');
+                bookingModal.classList.remove('modal-enter');
+            });
+        }
+        function closeBookingModal() { /* ... (Változatlan) ... */
+             bookingModal.classList.add('modal-leave-active');
+             bookingModal.classList.remove('modal-enter-active');
+             setTimeout(() => {
+                bookingModal.classList.add('hidden');
+                bookingModal.classList.remove('modal-leave-active');
+             }, 300);
+        }
+        async function confirmBooking() { /* ... (Változatlan) ... */
+            if (!firestore) return showError("Adatbázis kapcsolat nem elérhető.");
+            const bookingPurpose = modalBookingUserInput.value.trim();
+            if (!bookingPurpose) return alert("Kérlek add meg a foglaló nevét vagy a foglalás célját!");
+            const isRecurring = modalIsRecurringCheckbox.checked;
+
+            setModalLoading(true);
+            try {
+                await firestore.collection('bookings').add({
+                    roomId: bookingDataForModal.roomId,
+                    day: bookingDataForModal.day,
+                    timeSlot: bookingDataForModal.timeSlot,
+                    userId: currentUser.uid,
+                    user: bookingPurpose,
+                    type: isRecurring ? 'recurring' : 'single',
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                alert("Foglalás sikeresen mentve!");
+                closeBookingModal();
+            } catch (error) {
+                console.error("Error adding booking:", error);
+                alert(`Hiba a foglalás mentésekor: ${error.message}`);
+            } finally {
+                setModalLoading(false);
+            }
+        }
+        function setModalLoading(isLoading) { /* ... (Változatlan) ... */
+            modalConfirmButton.disabled = isLoading;
+            modalCancelButton.disabled = isLoading;
+            modalSpinner.classList.toggle('hidden', !isLoading);
+            modalConfirmText.textContent = isLoading ? 'Mentés...' : 'Foglalás Mentése';
+        }
+
+        // --- Foglalás Törlése ---
+        async function deleteBooking(bookingId, roomName, day, timeSlot, bookedBy) { /* ... (Változatlan) ... */
+              if (!firestore) return showError("Adatbázis kapcsolat nem elérhető.");
+             if (!confirm(`Biztosan törölni szeretnéd ezt a foglalást?\nTerem: ${roomName}\nIdőpont: ${day} ${timeSlot}\nFoglaló: ${bookedBy}`)) return;
+             console.log(`Deleting booking: ${bookingId}`);
+             try {
+                 await firestore.collection('bookings').doc(bookingId).delete();
+                 alert("Foglalás sikeresen törölve.");
+             } catch (error) {
+                 console.error("Error deleting booking:", error);
+                 alert(`Hiba történt a foglalás törlésekor: ${error.message}`);
+             }
+        }
+
+        // --- Admin Műveletek ---
+        async function addRoom() { /* ... (Változatlan) ... */
+             if (!firestore) return alert("Adatbázis nem elérhető.");
+            const roomNameInput = document.getElementById('newRoomName');
+            const roomName = roomNameInput.value.trim();
+            if (!roomName) return alert('Add meg a terem nevét!');
+            setAdminLoading(true);
+            try {
+                await firestore.collection('rooms').add({ name: roomName });
+                roomNameInput.value = '';
+                alert('Terem hozzáadva.');
+            } catch (error) { alert(`Hiba: ${error.message}`); }
+            finally { setAdminLoading(false); }
+        }
+        async function deleteRoom(roomId, roomName) { /* ... (Változatlan) ... */
+              if (!firestore) return alert("Adatbázis nem elérhető.");
+             if (!confirm(`Biztosan törlöd: "${roomName}"?\nFIGYELEM: Ez törli a foglalásait is!`)) return;
+             setAdminLoading(true);
+             try {
+                const batch = firestore.batch();
+                batch.delete(firestore.collection('rooms').doc(roomId));
+                const bookingsSnap = await firestore.collection('bookings').where('roomId', '==', roomId).get();
+                bookingsSnap.forEach(doc => batch.delete(doc.ref));
+                await batch.commit();
+                alert(`"${roomName}" terem és foglalásai törölve.`);
+            } catch (error) { alert(`Hiba: ${error.message}`); }
+            finally { setAdminLoading(false); }
+        }
+        async function addTimeSlot() { /* ... (Változatlan) ... */
+             if (!firestore) return alert("Adatbázis nem elérhető.");
+            const valueInput = document.getElementById('newTimeSlotValue');
+            const orderInput = document.getElementById('newTimeSlotOrder');
+            const value = valueInput.value.trim();
+            const order = parseInt(orderInput.value, 10) || 0;
+            if (!value || !/^\d{2}:\d{2}\s*-\s*\d{2}:\d{2}$/.test(value)) return alert('Hibás idősáv formátum!');
+            setAdminLoading(true);
+            try {
+                await firestore.collection('timeSlots').add({ value, order });
+                valueInput.value = '';
+                alert('Idősáv hozzáadva.');
+            } catch (error) { alert(`Hiba: ${error.message}`); }
+            finally { setAdminLoading(false); }
+        }
+        async function deleteTimeSlot(slotId, slotValue) { /* ... (Változatlan) ... */
+             if (!firestore) return alert("Adatbázis nem elérhető.");
+            if (!confirm(`Biztosan törlöd: "${slotValue}"?`)) return;
+            setAdminLoading(true);
+            try {
+                await firestore.collection('timeSlots').doc(slotId).delete();
+                alert(`"${slotValue}" idősáv törölve.`);
+            } catch (error) { alert(`Hiba: ${error.message}`); }
+            finally { setAdminLoading(false); }
+        }
+        // User management functions removed
+
+        function setAdminLoading(isLoading) { /* ... (Változatlan) ... */
+              const overlay = document.getElementById('admin-action-overlay');
+             const inputs = adminViewDiv.querySelectorAll('.admin-input');
+             const buttons = adminViewDiv.querySelectorAll('.admin-action-button');
+             if (isLoading) {
+                 overlay?.classList.remove('hidden');
+                 overlay?.classList.add('flex');
+                 inputs.forEach(input => input.disabled = true);
+                 buttons.forEach(button => button.disabled = true);
+             } else {
+                 overlay?.classList.add('hidden');
+                 overlay?.classList.remove('flex');
+                 inputs.forEach(input => input.disabled = false);
+                 buttons.forEach(button => button.disabled = false); // Enable all in no-auth mode
+             }
+        }
+
+        // --- Eseményfigyelők ---
+        function setupEventListeners() {
+            console.log("Setting up event listeners (No Auth)...");
+            window.addEventListener('hashchange', handleRouteChange);
+            modalCancelButton.addEventListener('click', closeBookingModal);
+            modalConfirmButton.addEventListener('click', confirmBooking);
+            console.log("Base event listeners attached.");
+        }
+
+         // --- Admin Eseménykezelő (Delegálás) ---
+        function handleAdminActions(event) {
+             const button = event.target.closest('.admin-action-button');
+            if (!button) return;
+            const action = button.dataset.action;
+            const li = button.closest('li');
+            const id = li?.dataset.id;
+            const name = li?.querySelector('span')?.textContent; // Terem/Idősáv neve/értéke
+
+            console.log("Admin action:", action, "ID:", id, "Name:", name);
+            if (action === 'delete-room' && id && name) deleteRoom(id, name);
+            else if (action === 'delete-timeslot' && id && name) deleteTimeSlot(id, name.split(' (')[0]);
+            // User actions removed
+            else if (button.id === 'add-room-button') addRoom();
+            else if (button.id === 'add-timeslot-button') addTimeSlot();
+            // Add user button removed
+        }
+
+
+        // --- Alkalmazás Indítása ---
+        document.addEventListener('DOMContentLoaded', initializeApp);
+
+    </script>
+
+</body>
+</html>
