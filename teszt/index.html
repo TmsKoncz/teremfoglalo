@@ -98,6 +98,9 @@
              background-color: #eef2ff; /* indigo-50 */
              font-weight: 600; /* font-semibold */
          }
+         /* Heti nézet cella tartalom */
+         .weekly-booking-details { cursor: pointer; }
+         .weekly-booking-details:hover { background-color: rgba(239, 246, 255, 0.5); } /* blue-50/50 */
 
     </style>
 </head>
@@ -156,6 +159,10 @@
                 <label for="bookingUser" class="block text-sm font-medium text-gray-700 mb-1">Foglaló neve / Foglalás célja:</label>
                 <input type="text" id="bookingUser" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" placeholder="Pl. Nagy Péter / 10.A Informatika óra">
             </div>
+             <div class="mb-4">
+                <label for="bookingComment" class="block text-sm font-medium text-gray-700 mb-1">Megjegyzés (opcionális):</label>
+                <input type="text" id="bookingComment" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" placeholder="Pl. Dolgozatírás">
+            </div>
             <div id="modal-recurring-option" class="hidden mb-4">
                 <label class="flex items-center space-x-2 cursor-pointer">
                     <input type="checkbox" id="modal-is-recurring" class="rounded border-gray-300 text-indigo-600 shadow-sm focus:ring-indigo-500">
@@ -175,10 +182,21 @@
 
     <div id="custom-dialog" class="modal-overlay">
         <div class="modal-content max-w-sm">
-            <p id="custom-dialog-message" class="text-gray-700 mb-4"></p>
+            <p id="custom-dialog-message" class="text-gray-700 mb-4 whitespace-pre-wrap"></p>
             <div id="custom-dialog-buttons" class="flex justify-end space-x-3"></div>
         </div>
     </div>
+
+     <div id="booking-details-modal" class="modal-overlay">
+        <div class="modal-content">
+            <h3 class="text-xl font-bold mb-4 text-indigo-700">Foglalás Részletei</h3>
+            <div id="booking-details-content" class="space-y-2 text-gray-800"></div>
+            <div class="flex justify-end mt-4">
+                 <button id="booking-details-close" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition duration-150">Bezárás</button>
+            </div>
+        </div>
+    </div>
+
 
     <footer class="text-center text-gray-500 text-sm py-4 mt-auto flex items-center justify-center space-x-2">
         <span>Powered by</span>
@@ -245,6 +263,7 @@
         const modalDate = document.getElementById('modal-date');
         const modalTimeslot = document.getElementById('modal-timeslot');
         const modalBookingUserInput = document.getElementById('bookingUser');
+        const modalBookingCommentInput = document.getElementById('bookingComment');
         const modalRecurringOptionDiv = document.getElementById('modal-recurring-option');
         const modalIsRecurringCheckbox = document.getElementById('modal-is-recurring');
         const modalCancelButton = document.getElementById('modal-cancel-button');
@@ -256,6 +275,9 @@
         const customDialog = document.getElementById('custom-dialog');
         const customDialogMessage = document.getElementById('custom-dialog-message');
         const customDialogButtons = document.getElementById('custom-dialog-buttons');
+        const bookingDetailsModal = document.getElementById('booking-details-modal');
+        const bookingDetailsContent = document.getElementById('booking-details-content');
+        const bookingDetailsCloseButton = document.getElementById('booking-details-close');
 
 
         // --- Dátum Segédfüggvények ---
@@ -438,7 +460,7 @@
             if (user) {
                 loginPopup.classList.add('hidden');
                 userStatusDiv.innerHTML = `
-                    <span class="text-sm hidden lg:inline" title="${escapeHtml(user.email)}">${escapeHtml(user.displayName || user.email)} ${user.isAdmin ? '<span class="text-yellow-300">(Admin)</span>' : ''}</span>
+                    <span class="text-sm hidden lg:inline" title="${escapeHtml(user.email)}">${escapeHtml(user.nickname || user.displayName || user.email)} ${user.isAdmin ? '<span class="text-yellow-300">(Admin)</span>' : ''}</span>
                     <button id="logout-button" class="bg-red-500 hover:bg-red-600 text-white text-xs sm:text-sm font-semibold py-1 px-2 sm:px-3 rounded transition duration-150 ease-in-out">
                         Kijelentkezés
                     </button>
@@ -452,12 +474,15 @@
                     setupAdminFirestoreListeners();
                 }
                  if (initialPublicDataLoaded) {
-                    // Ha az auth state megváltozott, mindig újraértékeljük a routingot/nézetet
-                    handleRouteChange();
+                    if (!wasLoggedIn || currentView === 'loading') {
+                        handleRouteChange();
+                    } else if (currentView !== 'error') {
+                        renderView();
+                    }
                  }
 
-            } else { // User is null (logged out)
-                 if (currentUser !== undefined) { // Csak akkor frissítsük, ha nem a kezdeti undefined állapot
+            } else {
+                 if (currentUser !== undefined) {
                     userStatusDiv.innerHTML = `<button id="show-login-button" class="bg-blue-500 hover:bg-blue-700 text-white text-sm font-semibold py-1 px-2 sm:px-3 rounded">Bejelentkezés</button>`;
                     const loginBtn = document.getElementById('show-login-button');
                     if (loginBtn) {
@@ -470,7 +495,7 @@
                     if (currentView === 'admin') {
                         navigateTo('#/');
                     } else if (initialPublicDataLoaded && currentView !== 'loading' && currentView !== 'error') {
-                        renderView(); // Frissítsük a nézetet (gombok letiltása)
+                        renderView();
                     }
                  }
             }
@@ -583,13 +608,18 @@
                                                         const isBooked = !!booking;
                                                         const canDelete = currentUser && booking && (currentUser.uid === booking.userId || currentUser.isAdmin);
                                                         const canBook = !isBooked;
+                                                        const displayUser = booking?.user || '';
+                                                        const displayComment = booking?.comment || '';
+                                                        // Egyszerűsített megjelenítés, ha túl hosszú lenne
+                                                        const fullText = displayUser + (displayComment ? ` (${displayComment})` : '');
+                                                        const displayName = fullText.length > 25 ? `${displayUser.split(' ')[0]}...` : fullText;
 
                                                         return `
                                                             <li class="flex items-center space-x-1.5 text-xs group relative">
                                                                 <span class="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0 ${isBooked ? 'bg-red-500' : 'bg-green-500'}" title="${isBooked ? 'Foglalt' : 'Szabad'}"></span>
-                                                                <span class="flex-grow overflow-hidden overflow-ellipsis whitespace-nowrap ${isBooked ? 'text-gray-700' : 'text-gray-500'}">
+                                                                <span class="flex-grow overflow-hidden overflow-ellipsis whitespace-nowrap ${isBooked ? 'text-gray-700' : 'text-gray-500'} weekly-booking-details" ${isBooked ? `onclick="showBookingDetails('${booking.id}')"` : ''} title="${isBooked ? escapeHtml(fullText) : ''}">
                                                                     ${escapeHtml(room.name)}
-                                                                    ${isBooked ? `<span class="text-red-700 font-medium"> (${escapeHtml(booking.user?.split(' ')[0] || '')}${isRecurringMatch ? '<span class="recurring-indicator">(R)</span>' : ''})</span>` : ''}
+                                                                    ${isBooked ? `<span class="text-red-700 font-medium"> (${displayName}${isRecurringMatch ? '<span class="recurring-indicator">(R)</span>' : ''})</span>` : ''}
                                                                 </span>
                                                                 ${canBook ? `
                                                                     <button
@@ -680,11 +710,14 @@
                             const booking = todayBookingsMap.get(`${room.id}-${slot.value}`);
                             const isActive = slot.value === currentTimeSlotValue;
                             const isBooked = !!booking;
+                            const displayUser = booking?.user || 'Szabad';
+                            const displayComment = booking?.comment || '';
 
                             summaryHTML += `
                                 <li class="timeslot-box py-2 flex justify-between items-center ${isActive ? 'active bg-indigo-50 font-semibold' : ''}" data-timeslot="${escapeHtml(slot.value)}">
                                     <div class="flex-grow"> <span class="font-medium text-gray-800">${escapeHtml(slot.value)}</span>
-                                        <span class="ml-2 text-gray-600"> - ${isBooked ? escapeHtml(booking.user) : 'Szabad'}</span>
+                                        <span class="ml-2 text-gray-600"> - ${escapeHtml(displayUser)}</span>
+                                        ${displayComment ? `<span class="ml-2 text-gray-500 italic">(${escapeHtml(displayComment)})</span>` : ''}
                                         ${isBooked ? `<span class="booking-type-badge">${booking.type === 'recurring' ? 'Rendszeres' : 'Egyszeri'}</span>` : ''}
                                     </div>
                                     ${isActive ? `<span class="status-indicator active !relative !top-auto !right-auto !transform-none ml-2">MOST</span>` : ''} </li>
@@ -750,6 +783,7 @@
                      const isBooked = !!booking;
                      const typeText = isBooked ? (booking.type === 'recurring' ? 'Rendszeres' : 'Egyszeri') : '';
                      const userText = isBooked ? escapeHtml(booking.user) : 'SZABAD';
+                     const commentText = isBooked ? escapeHtml(booking.comment || '') : '';
 
                      // Osztályok összeállítása
                      let liClasses = `timeslot-box border-l-4 ${isBooked ? 'border-red-500' : 'border-green-500'} bg-white p-4 rounded-lg shadow-md relative`; // Vékony szegély, p-4 padding
@@ -761,7 +795,8 @@
 
                      roomHTML += `
                         <li class="${liClasses}" data-timeslot="${escapeHtml(slot.value)}">
-                             <div class="flex-grow flex flex-col justify-center"> <div class="flex justify-between items-center mb-1 relative">
+                             <div class="flex-grow flex flex-col justify-center">
+                                <div class="flex justify-between items-center mb-1 relative">
                                     <span class="font-semibold text-gray-800 text-lg">${escapeHtml(slot.value)}</span>
                                     ${isActive ? `<span class="status-indicator active">MOST</span>` : ''}
                                     ${isNext ? `<span class="status-indicator next">KÖVETKEZIK</span>` : ''}
@@ -770,6 +805,7 @@
                                     ${userText}
                                     ${isBooked ? `<span class="booking-type-badge">${typeText}</span>` : ''}
                                 </div>
+                                ${commentText ? `<div class="text-gray-500 text-sm italic mt-1">${commentText}</div>` : ''}
                              </div>
                         </li>
                      `;
@@ -810,27 +846,34 @@
                     </section>
                     <section>
                         <h3 class="text-xl font-semibold mb-3 text-gray-800 border-b pb-2">Engedélyezett Felhasználók (Aktív)</h3>
-                        <ul id="admin-users-list" class="space-y-2 mb-4 max-h-60 overflow-y-auto border rounded p-2">${allowedUsers.length === 0 ? '<li class="text-gray-500 italic">Nincsenek engedélyezett felhasználók.</li>' : allowedUsers.map(allowedUser => `<li data-id="${allowedUser.id}" data-email="${escapeHtml(allowedUser.email)}" data-isadmin="${allowedUser.isAdmin}" class="flex flex-wrap justify-between items-center p-2 border-b last:border-b-0 gap-2"><div class="flex-grow"><span class="text-sm font-medium">${escapeHtml(allowedUser.email || 'N/A')}</span><span class="text-xs text-gray-500 block break-all">UID: ${allowedUser.id}</span></div><div class="flex space-x-2 flex-shrink-0 items-center">${allowedUser.isAdmin ? '<span class="font-bold text-purple-700 text-xs mr-2">(Admin)</span>' : ''}<button data-action="toggle-admin" class="admin-action-button text-xs px-2 py-1 rounded ${allowedUser.isAdmin ? 'bg-yellow-500 hover:bg-yellow-600' : 'bg-blue-500 hover:bg-blue-600'} text-white ${allowedUser.id === currentUser.uid ? 'opacity-50 cursor-not-allowed' : ''}" ${allowedUser.id === currentUser.uid ? 'disabled' : ''}>${allowedUser.isAdmin ? 'Admin Elvétel' : 'Admin Adás'}</button><button data-action="delete-user" class="admin-action-button text-red-600 hover:text-red-800 text-xs font-semibold px-2 py-1 rounded hover:bg-red-50 ${allowedUser.id === currentUser.uid ? 'opacity-50 cursor-not-allowed' : ''}" ${allowedUser.id === currentUser.uid ? 'disabled' : ''}>Eltávolít</button></div></li>`).join('')}</ul>
+                        <ul id="admin-users-list" class="space-y-2 mb-4 max-h-60 overflow-y-auto border rounded p-2">${allowedUsers.length === 0 ? '<li class="text-gray-500 italic">Nincsenek engedélyezett felhasználók.</li>' : allowedUsers.map(allowedUser => `<li data-id="${allowedUser.id}" data-email="${escapeHtml(allowedUser.email)}" data-isadmin="${allowedUser.isAdmin}" data-nickname="${escapeHtml(allowedUser.nickname || '')}" class="flex flex-wrap justify-between items-center p-2 border-b last:border-b-0 gap-2"><div class="flex-grow"><span class="text-sm font-medium">${escapeHtml(allowedUser.nickname || allowedUser.email || 'N/A')}</span>${allowedUser.nickname ? `<span class="text-xs text-gray-500 block">(${escapeHtml(allowedUser.email || 'N/A')})</span>` : ''}<span class="text-xs text-gray-500 block break-all">UID: ${allowedUser.id}</span></div><div class="flex space-x-2 flex-shrink-0 items-center">${allowedUser.isAdmin ? '<span class="font-bold text-purple-700 text-xs mr-2">(Admin)</span>' : ''}<button data-action="edit-user" class="admin-action-button text-xs px-2 py-1 rounded bg-gray-500 hover:bg-gray-600 text-white">Név Szerk.</button><button data-action="toggle-admin" class="admin-action-button text-xs px-2 py-1 rounded ${allowedUser.isAdmin ? 'bg-yellow-500 hover:bg-yellow-600' : 'bg-blue-500 hover:bg-blue-600'} text-white ${allowedUser.id === currentUser.uid ? 'opacity-50 cursor-not-allowed' : ''}" ${allowedUser.id === currentUser.uid ? 'disabled' : ''}>${allowedUser.isAdmin ? 'Admin Elvétel' : 'Admin Adás'}</button><button data-action="delete-user" class="admin-action-button text-red-600 hover:text-red-800 text-xs font-semibold px-2 py-1 rounded hover:bg-red-50 ${allowedUser.id === currentUser.uid ? 'opacity-50 cursor-not-allowed' : ''}" ${allowedUser.id === currentUser.uid ? 'disabled' : ''}>Eltávolít</button></div></li>`).join('')}</ul>
                     </section>
                     <section>
                         <h3 class="text-xl font-semibold mb-3 text-gray-800 border-b pb-2">Meghívott Felhasználók (Email Alapú)</h3>
                         <ul id="admin-pending-users-list" class="space-y-2 mb-4 max-h-60 overflow-y-auto border rounded p-2">
                             ${pendingUsers.length === 0 ? '<li class="text-gray-500 italic">Nincsenek meghívott felhasználók.</li>' :
                                 pendingUsers.map(pending => `
-                                <li data-email="${escapeHtml(pending.id)}" data-isadmin="${pending.isAdmin}" class="flex flex-wrap justify-between items-center p-2 border-b last:border-b-0 gap-2">
+                                <li data-email="${escapeHtml(pending.id)}" data-isadmin="${pending.isAdmin}" data-nickname="${escapeHtml(pending.nickname || '')}" class="flex flex-wrap justify-between items-center p-2 border-b last:border-b-0 gap-2">
                                     <div class="flex-grow">
-                                        <span class="text-sm font-medium">${escapeHtml(pending.id)}</span> </div>
+                                        <span class="text-sm font-medium">${escapeHtml(pending.nickname || pending.id)}</span>
+                                        ${pending.nickname ? `<span class="text-xs text-gray-500 block">(${escapeHtml(pending.id)})</span>` : ''}
+                                    </div>
                                     <div class="flex space-x-2 flex-shrink-0 items-center">
                                         ${pending.isAdmin ? '<span class="font-bold text-purple-700 text-xs mr-2">(Adminnak meghívva)</span>' : '<span class="text-xs text-gray-500 mr-2">(Felhasználónak meghívva)</span>'}
+                                        <button data-action="edit-pending" class="admin-action-button text-xs px-2 py-1 rounded bg-gray-500 hover:bg-gray-600 text-white">Szerkeszt</button>
                                         <button data-action="delete-pending" class="admin-action-button text-red-600 hover:text-red-800 text-xs font-semibold px-2 py-1 rounded hover:bg-red-50">Meghívás Törlése</button>
                                     </div>
                                 </li>`).join('')
                             }
                         </ul>
                         <div class="flex flex-col sm:flex-row items-end space-y-2 sm:space-y-0 sm:space-x-2 border-t pt-4">
-                            <div class="flex-grow w-full sm:w-auto">
+                            <div class="flex-grow w-full sm:w-1/3">
                                 <label for="newPendingUserEmail" class="block text-sm font-medium text-gray-700 mb-1">Új felhasználó Email címe:</label>
                                 <input type="email" id="newPendingUserEmail" class="admin-input w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" placeholder="user@example.com">
+                            </div>
+                             <div class="flex-grow w-full sm:w-1/3">
+                                <label for="newPendingUserNickname" class="block text-sm font-medium text-gray-700 mb-1">Megj. név/Becenév (opc.):</label>
+                                <input type="text" id="newPendingUserNickname" class="admin-input w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" placeholder="Pl. Kovács János">
                             </div>
                             <div class="flex items-center h-10 pt-2 sm:pt-0">
                                 <input type="checkbox" id="newPendingUserIsAdmin" class="admin-input mr-2 rounded border-gray-300 text-indigo-600 shadow-sm focus:ring-indigo-500">
@@ -869,7 +912,7 @@
                             if (userDoc.exists) {
                                 console.log("User found in allowedUsers. Data:", userDoc.data());
                                 const userData = userDoc.data();
-                                resolvedUser = { uid: user.uid, displayName: user.displayName, email: user.email, isAdmin: userData.isAdmin || false };
+                                resolvedUser = { uid: user.uid, displayName: user.displayName, email: user.email, isAdmin: userData.isAdmin || false, nickname: userData.nickname || null };
                             } else {
                                 console.log("User not in allowedUsers, checking pendingUsers for email:", user.email.toLowerCase());
                                 const pendingUserDocRef = firestore.collection('pendingUsers').doc(user.email.toLowerCase());
@@ -877,9 +920,9 @@
                                 if (pendingDoc.exists) {
                                     console.log("User found in pendingUsers. Data:", pendingDoc.data());
                                     const pendingData = pendingDoc.data();
-                                    resolvedUser = { uid: user.uid, displayName: user.displayName, email: user.email, isAdmin: pendingData.isAdmin || false };
+                                    resolvedUser = { uid: user.uid, displayName: user.displayName, email: user.email, isAdmin: pendingData.isAdmin || false, nickname: pendingData.nickname || null };
                                     const batch = firestore.batch();
-                                    batch.set(userDocRef, { email: user.email.toLowerCase(), isAdmin: resolvedUser.isAdmin });
+                                    batch.set(userDocRef, { email: user.email.toLowerCase(), isAdmin: resolvedUser.isAdmin, nickname: resolvedUser.nickname });
                                     batch.delete(pendingUserDocRef);
                                     console.log("Attempting to commit batch: add to allowedUsers, delete from pendingUsers");
                                     await batch.commit();
@@ -1022,7 +1065,8 @@
             modalDay.textContent = day;
             modalDate.textContent = formatShortDate(new Date(dateString + 'T00:00:00'));
             modalTimeslot.textContent = timeSlot;
-            modalBookingUserInput.value = currentUser.displayName || '';
+            modalBookingUserInput.value = currentUser.nickname || currentUser.displayName || ''; // Nickname vagy Google név
+            modalBookingCommentInput.value = '';
             modalIsRecurringCheckbox.checked = false;
             modalRecurringOptionDiv.classList.toggle('hidden', !currentUser.isAdmin);
 
@@ -1031,21 +1075,21 @@
                 modalUserSelector.innerHTML = '';
                 const adminOption = document.createElement('option');
                 adminOption.value = currentUser.uid;
-                adminOption.textContent = `${currentUser.displayName} (Én)`;
+                adminOption.textContent = `${currentUser.nickname || currentUser.displayName} (Én)`;
                 adminOption.selected = true;
                 modalUserSelector.appendChild(adminOption);
-                allowedUsers.filter(u => u.email).sort((a,b) => a.email.localeCompare(b.email)).forEach(user => {
+                allowedUsers.filter(u => u.email).sort((a,b) => (a.nickname || a.email).localeCompare(b.nickname || b.email)).forEach(user => {
                     if (user.id !== currentUser.uid) {
                         const option = document.createElement('option');
                         option.value = user.id;
-                        option.textContent = user.email;
+                        option.textContent = user.nickname || user.email;
                         modalUserSelector.appendChild(option);
                     }
                 });
                 modalUserSelector.onchange = () => {
                     const selectedOption = modalUserSelector.options[modalUserSelector.selectedIndex];
                     const selectedUser = allowedUsers.find(u => u.id === selectedOption.value);
-                    modalBookingUserInput.value = selectedUser?.displayName || selectedUser?.email || '';
+                    modalBookingUserInput.value = selectedUser?.nickname || selectedUser?.displayName || selectedUser?.email || '';
                 };
             } else {
                 modalUserSelectorDiv.classList.add('hidden');
@@ -1066,18 +1110,20 @@
         async function confirmBooking() {
             if (!currentUser || !firestore) return showError("Nincs bejelentkezett felhasználó vagy adatbázis kapcsolat.");
             const bookingPurpose = modalBookingUserInput.value.trim();
+            const bookingComment = modalBookingCommentInput.value.trim();
             if (!bookingPurpose) return showCustomAlert("Kérlek add meg a foglaló nevét vagy a foglalás célját!");
             const isRecurring = modalIsRecurringCheckbox.checked && currentUser.isAdmin;
 
             let targetUserId = currentUser.uid;
-            let targetUserName = bookingPurpose;
+            let targetUserName = bookingPurpose; // A beírt név/cél lesz a foglalás 'user' mezője
 
             if (currentUser.isAdmin && modalUserSelector.value !== currentUser.uid) {
                 targetUserId = modalUserSelector.value;
-                console.log(`Admin booking for user: ${targetUserId} with purpose/name: ${targetUserName}`);
+                console.log(`Admin booking for user: ${targetUserId} with name/purpose: ${targetUserName}`);
             } else {
                  targetUserId = currentUser.uid;
-                 targetUserName = bookingPurpose || currentUser.displayName || '';
+                 // Ha saját magának foglal, és nem írt be nevet, használjuk a nicknevét/Google nevét
+                 if (!targetUserName) targetUserName = currentUser.nickname || currentUser.displayName || '';
                  console.log(`User booking for self: ${targetUserId} (${targetUserName})`);
             }
 
@@ -1090,6 +1136,7 @@
                     date: isRecurring ? null : bookingDataForModal.date,
                     userId: targetUserId,
                     user: targetUserName,
+                    comment: bookingComment || null, // Megjegyzés mentése
                     type: isRecurring ? 'recurring' : 'single',
                     createdAt: firebase.firestore.FieldValue.serverTimestamp()
                 });
@@ -1118,6 +1165,7 @@
                  showCustomAlert("Nincs jogosultságod ennek a foglalásnak a törléséhez.", "Hiba");
                  return;
              }
+             // Ha nem admin, és rendszeres foglalást próbál törölni
              if (!currentUser.isAdmin && booking.type === 'recurring') {
                   showCustomAlert("Rendszeres foglalást csak adminisztrátor törölhet.", "Hiba");
                   return;
@@ -1173,14 +1221,16 @@
         async function addPendingUser() { // Email alapú meghívó
               if (!currentUser?.isAdmin || !firestore) return showCustomAlert("Nincs jogosultságod.", "Hiba");
              const emailInput = document.getElementById('newPendingUserEmail');
+             const nicknameInput = document.getElementById('newPendingUserNickname');
              const isAdminCheckbox = document.getElementById('newPendingUserIsAdmin');
              const email = emailInput.value.trim().toLowerCase();
+             const nickname = nicknameInput.value.trim();
              const isAdmin = isAdminCheckbox.checked;
              if (!email || !email.includes('@')) return showCustomAlert('Adj meg egy érvényes email címet!');
              const docRef = firestore.collection('pendingUsers').doc(email);
              const docSnap = await docRef.get();
              if (docSnap.exists) {
-                  const confirmed = await showCustomConfirm(`"${email}" már meg van hívva. Frissíted a jogosultságát?`, "Megerősítés");
+                  const confirmed = await showCustomConfirm(`"${email}" már meg van hívva. Frissíted a jogosultságát és a nevét?`, "Megerősítés");
                   if (!confirmed) return;
              }
              const allowedQuery = firestore.collection('allowedUsers').where('email', '==', email);
@@ -1188,7 +1238,7 @@
              if (!allowedSnap.empty) { showCustomAlert(`"${email}" már szerepel az engedélyezett felhasználók között.`); return; }
 
              setAdminLoading(true);
-             try { await docRef.set({ isAdmin }); emailInput.value = ''; isAdminCheckbox.checked = false; showCustomAlert(`"${email}" sikeresen meghívva.`); }
+             try { await docRef.set({ isAdmin: isAdmin, nickname: nickname || null }); emailInput.value = ''; nicknameInput.value = ''; isAdminCheckbox.checked = false; showCustomAlert(`"${email}" sikeresen meghívva.`); }
              catch (error) { showCustomAlert(`Hiba a meghíváskor: ${error.message}`, "Hiba"); } finally { setAdminLoading(false); }
         }
         async function deleteAllowedUser(userId, userEmail) { // UID alapú törlés
@@ -1215,11 +1265,35 @@
              try { await firestore.collection('allowedUsers').doc(userId).update({ isAdmin: !currentIsAdmin }); showCustomAlert(`"${userEmail || userId}" admin státusza módosítva.`); }
              catch (error) { showCustomAlert(`Hiba: ${error.message}`, "Hiba"); } finally { setAdminLoading(false); }
         }
+        async function editUser(userId, currentEmail, currentNickname) { // Allowed user szerkesztése
+            if (!currentUser?.isAdmin || !firestore) return showCustomAlert("Nincs jogosultságod.", "Hiba");
+            const newNickname = prompt(`Add meg "${currentEmail}" új megjelenítendő nevét (üresen hagyva törli):`, currentNickname || '');
+            if (newNickname === null) return; // Mégse gomb
+            setAdminLoading(true);
+            try {
+                await firestore.collection('allowedUsers').doc(userId).update({ nickname: newNickname.trim() || null });
+                showCustomAlert(`"${currentEmail}" megjelenítendő neve frissítve.`);
+            } catch (error) { showCustomAlert(`Hiba a név frissítésekor: ${error.message}`, "Hiba"); }
+            finally { setAdminLoading(false); }
+        }
+        async function editPendingUser(email, currentNickname, currentIsAdmin) { // Pending user szerkesztése
+            if (!currentUser?.isAdmin || !firestore) return showCustomAlert("Nincs jogosultságod.", "Hiba");
+            const newNickname = prompt(`Add meg "${email}" új megjelenítendő nevét (üresen hagyva törli):`, currentNickname || '');
+            if (newNickname === null) return;
+            const newIsAdmin = confirm(`Legyen "${email}" adminisztrátor? (Jelenlegi: ${currentIsAdmin ? 'Igen' : 'Nem'})`);
+
+            setAdminLoading(true);
+            try {
+                await firestore.collection('pendingUsers').doc(email).update({ nickname: newNickname.trim() || null, isAdmin: newIsAdmin });
+                showCustomAlert(`"${email}" meghívott adatai frissítve.`);
+            } catch (error) { showCustomAlert(`Hiba a meghívott adatainak frissítésekor: ${error.message}`, "Hiba"); }
+            finally { setAdminLoading(false); }
+        }
         function setAdminLoading(isLoading) {
               const overlay = document.getElementById('admin-action-overlay');
              const inputs = adminViewDiv.querySelectorAll('.admin-input');
              const buttons = adminViewDiv.querySelectorAll('.admin-action-button');
-             overlay?.classList.toggle('hidden', !isLoading); // Explicit toggle
+             overlay?.classList.toggle('hidden', !isLoading);
              overlay?.classList.toggle('flex', isLoading);
              inputs.forEach(input => input.disabled = isLoading);
              buttons.forEach(button => {
@@ -1238,7 +1312,7 @@
             loginPopupCloseButton.addEventListener('click', () => loginPopup.classList.add('hidden'));
             modalCancelButton.addEventListener('click', closeBookingModal);
             modalConfirmButton.addEventListener('click', confirmBooking);
-            // Az admin gombok figyelője delegálással kerül hozzáadásra a renderAdminView-ban
+            bookingDetailsCloseButton.addEventListener('click', closeBookingDetailsModal);
             console.log("Base event listeners attached.");
         }
 
@@ -1250,22 +1324,24 @@
             const action = button.dataset.action;
             const li = button.closest('li');
             const id = li?.dataset.id; // UID vagy Doc ID
-            const email = li?.dataset.email; // Email (lehet allowed vagy pending)
+            const email = li?.dataset.email;
             const isadmin = li?.dataset.isadmin === 'true';
+            const nickname = li?.dataset.nickname;
             const nameElement = li?.querySelector('span');
-            let name = nameElement?.textContent; // Terem/Idősáv/Email
+            let name = nameElement?.textContent;
 
-            console.log("Admin action:", action, "ID:", id, "Email:", email, "IsAdmin:", isadmin, "Name:", name);
+            console.log("Admin action:", action, "ID:", id, "Email:", email, "IsAdmin:", isadmin, "Name:", name, "Nickname:", nickname);
 
             if (action === 'delete-room' && id && name) deleteRoom(id, name);
             else if (action === 'delete-timeslot' && id && name) deleteTimeSlot(id, name.split(' (')[0]);
             else if (action === 'toggle-admin' && id) toggleAdminStatus(id, email, isadmin);
             else if (action === 'delete-user' && id) deleteAllowedUser(id, email);
             else if (action === 'delete-pending' && email) deletePendingUser(email);
-            // Az űrlap gombjait ID alapján azonosítjuk
+            else if (action === 'edit-user' && id) editUser(id, email, nickname); // Szerkesztés hívása
+            else if (action === 'edit-pending' && email) editPendingUser(email, nickname, isadmin); // Pending szerkesztés hívása
             else if (button.id === 'add-room-button') addRoom();
             else if (button.id === 'add-timeslot-button') addTimeSlot();
-            else if (button.id === 'add-pending-user-button') addPendingUser(); // Email alapú meghívás
+            else if (button.id === 'add-pending-user-button') addPendingUser();
         }
 
         // --- Login Popup Kezelése ---
@@ -1310,7 +1386,6 @@
             }
             customDialog.classList.add('active');
             requestAnimationFrame(() => { customDialog.querySelector('.modal-content').classList.add('modal-enter-active'); });
-
         }
         function showCustomAlert(message, title = 'Értesítés') { showCustomDialog(message, 'alert', title); }
         function showCustomConfirm(message, title = 'Megerősítés') {
@@ -1327,6 +1402,37 @@
                      showCustomDialog(message, 'confirm', title);
                 }
             });
+        }
+
+        // --- Foglalás Részletei Popup ---
+        function showBookingDetails(bookingId) {
+            const booking = bookings.find(b => b.id === bookingId);
+            if (!booking) return;
+
+            const room = rooms.find(r => r.id === booking.roomId);
+            const userDisplay = booking.user || 'Ismeretlen';
+            const commentDisplay = booking.comment || 'Nincs megjegyzés';
+            const typeDisplay = booking.type === 'recurring' ? 'Rendszeres' : 'Egyszeri';
+            const dateDisplay = booking.date ? formatFullDate(new Date(booking.date + 'T00:00:00')) : 'Minden héten';
+
+            bookingDetailsContent.innerHTML = `
+                <p><span class="font-semibold">Terem:</span> ${escapeHtml(room?.name || booking.roomId)}</p>
+                <p><span class="font-semibold">Időpont:</span> ${escapeHtml(booking.day || '')} ${dateDisplay !== 'Minden héten' ? `(${dateDisplay})` : ''}, ${escapeHtml(booking.timeSlot)}</p>
+                <p><span class="font-semibold">Foglaló/Cél:</span> ${escapeHtml(userDisplay)}</p>
+                <p><span class="font-semibold">Megjegyzés:</span> ${escapeHtml(commentDisplay)}</p>
+                <p><span class="font-semibold">Típus:</span> ${typeDisplay}</p>
+            `;
+            bookingDetailsModal.classList.add('active');
+            requestAnimationFrame(() => { bookingDetailsModal.querySelector('.modal-content').classList.add('modal-enter-active'); });
+        }
+        function closeBookingDetailsModal() {
+             const content = bookingDetailsModal.querySelector('.modal-content');
+             content.classList.remove('modal-enter-active');
+             content.classList.add('modal-leave-active');
+             setTimeout(() => {
+                bookingDetailsModal.classList.remove('active');
+                content.classList.remove('modal-leave-active');
+             }, 300);
         }
 
 
