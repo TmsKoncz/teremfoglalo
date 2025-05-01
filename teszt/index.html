@@ -23,7 +23,7 @@
         #admin-action-overlay .spinner { width: 24px; height: 24px; }
         .view-loading::after { content: 'Adatok betöltése...'; display: block; text-align: center; padding: 2rem; color: #6b7280; font-style: italic; }
         .book-button-disabled { cursor: not-allowed; opacity: 0.5; }
-        .recurring-indicator { font-weight: bold; color: #ca8a04; margin-left: 2px; }
+        .recurring-indicator-icon { display: inline-block; width: 0.75em; height: 0.75em; margin-left: 2px; vertical-align: middle; fill: currentColor; } /* Ikon stílusa */
         /* Header elrejtése */
         body.no-header #app-header { display: none; }
         body.no-header #main-content { margin-top: 0; padding-top: 0; }
@@ -198,11 +198,13 @@
 
      <div id="booking-details-modal" class="modal-overlay">
         <div class="modal-content">
-            <h3 class="text-xl font-bold mb-4 text-indigo-700">Foglalás Részletei</h3>
-            <div id="booking-details-content" class="space-y-2 text-gray-800"></div>
-            <div class="flex justify-end mt-4">
-                 <button id="booking-details-close" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition duration-150">Bezárás</button>
+            <div class="flex justify-between items-center mb-4">
+                 <h3 class="text-xl font-bold text-indigo-700">Foglalás Részletei</h3>
+                 <button id="booking-details-close" class="text-gray-500 hover:text-gray-700 text-2xl leading-none">&times;</button>
             </div>
+            <div id="booking-details-content" class="space-y-2 text-gray-800"></div>
+            <div id="booking-details-actions" class="flex justify-end mt-4 space-x-3">
+                 </div>
         </div>
     </div>
 
@@ -290,6 +292,7 @@
         const customDialogButtons = document.getElementById('custom-dialog-buttons');
         const bookingDetailsModal = document.getElementById('booking-details-modal');
         const bookingDetailsContent = document.getElementById('booking-details-content');
+        const bookingDetailsActions = document.getElementById('booking-details-actions');
         const bookingDetailsCloseButton = document.getElementById('booking-details-close');
 
 
@@ -318,10 +321,10 @@
                 googleProvider = new firebase.auth.GoogleAuthProvider();
                 console.log("Firebase (App, Firestore, Auth) sikeresen inicializálva.");
                 setupEventListeners();
-                setupPublicFirestoreListeners();
-                setupAuthListener();
+                setupPublicFirestoreListeners(); // Nyilvános adatok figyelőinek indítása
+                setupAuthListener(); // Auth listener indítása (ez kezeli a user állapotot és a további listenereket)
                 document.getElementById('current-year').textContent = new Date().getFullYear();
-                startClockAndDayCheck();
+                startClockAndDayCheck(); // Óra és napváltás figyelő indítása
                 console.log("initializeApp() finished successfully.");
             } catch (error) {
                 console.error("Firebase inicializálási hiba:", error);
@@ -400,7 +403,7 @@
                     targetRoomId = foundRoomId;
                      if (window.location.hash !== '#room') {
                         window.location.hash = '#room';
-                        return;
+                        return; // hashchange event will re-trigger this
                     }
                 } else {
                     console.error(`Room not found for URL param id: ${urlRoomNameParam}`);
@@ -448,7 +451,7 @@
             const oldUrl = window.location.pathname + window.location.search + window.location.hash;
 
             if (oldUrl !== newUrl) {
-                 window.location.href = newUrl;
+                 window.location.href = newUrl; // Ez vált hashchange eseményt
             } else if (currentView !== targetPath.split('?')[0]) {
                  // Ha az URL ugyanaz, de a nézet más (pl. admin jogosultság hiba után), akkor is frissítünk
                  switchView(targetPath.split('?')[0]);
@@ -489,16 +492,13 @@
                     setupAdminFirestoreListeners();
                 }
                  if (initialPublicDataLoaded) {
-                    if (!wasLoggedIn || currentView === 'loading') {
-                        handleRouteChange();
-                    } else if (currentView !== 'error') {
-                        renderView();
-                    }
+                    // Ha az auth state megváltozott, mindig újraértékeljük a routingot/nézetet
+                    handleRouteChange();
                  }
                  displayAnnouncement();
 
             } else {
-                 if (currentUser !== undefined) {
+                 if (currentUser !== undefined) { // Csak akkor frissítsük, ha nem a kezdeti undefined állapot
                     userStatusDiv.innerHTML = `<button id="show-login-button" class="bg-blue-500 hover:bg-blue-700 text-white text-sm font-semibold py-1 px-2 sm:px-3 rounded">Bejelentkezés</button>`;
                     const loginBtn = document.getElementById('show-login-button');
                     if (loginBtn) {
@@ -512,7 +512,7 @@
                     if (currentView === 'admin') {
                         navigateTo('#/');
                     } else if (initialPublicDataLoaded && currentView !== 'loading' && currentView !== 'error') {
-                        renderView();
+                        renderView(); // Frissítsük a nézetet (gombok letiltása)
                     }
                  }
             }
@@ -590,8 +590,7 @@
             let tableHTML = `
                 <div class="flex justify-between items-center mb-4">
                     <button onclick="changeWeek(-1)" class="bg-indigo-500 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded">&lt; Előző hét</button>
-                    <h2 class="text-xl sm:text-2xl font-bold text-center text-gray-800">
-                        Heti Teremfoglalások <br class="sm:hidden"> (${formatShortDate(weekDates[0])} - ${formatShortDate(weekDates[4])})
+                    <h2 class="text-lg sm:text-xl font-bold text-center text-gray-800"> Heti Teremfoglalások <br class="sm:hidden"> (${formatShortDate(weekDates[0])} - ${formatShortDate(weekDates[4])})
                     </h2>
                     <button onclick="changeWeek(1)" class="bg-indigo-500 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded">Következő hét &gt;</button>
                 </div>
@@ -641,14 +640,14 @@
                                                         const displayUser = booking?.user || '';
                                                         const displayComment = booking?.comment || '';
                                                         const fullText = displayUser + (displayComment ? ` (${displayComment})` : '');
-                                                        const displayName = fullText.length > 25 ? `${displayUser.split(' ')[0]}...` : fullText; // Csak az első szót mutatjuk, ha túl hosszú
+                                                        const displayName = fullText; // Teljes név
 
                                                         return `
                                                             <li class="flex items-center space-x-1.5 text-xs group relative">
                                                                 <span class="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0 ${isBooked ? 'bg-red-500' : (isCancelled ? 'bg-gray-400' : 'bg-green-500')}" title="${isBooked ? 'Foglalt' : (isCancelled ? 'Lemondva' : 'Szabad')}"></span>
-                                                                <span class="flex-grow overflow-hidden overflow-ellipsis whitespace-nowrap ${isBooked ? 'text-gray-700' : 'text-gray-500'} ${isCancelled ? 'line-through text-gray-400' : ''} weekly-booking-details" ${isBooked ? `onclick="showBookingDetails('${booking.id}')"` : ''} title="${isBooked ? escapeHtml(fullText) : (isCancelled ? 'Lemondva' : '')}">
+                                                                <span class="flex-grow overflow-hidden overflow-ellipsis whitespace-nowrap ${isBooked ? 'text-gray-700' : 'text-gray-500'} ${isCancelled ? 'line-through text-gray-400' : ''} weekly-booking-details" ${isBooked ? `onclick="showBookingDetails('${booking.id}', ${isRecurringMatch})"` : ''} title="${isBooked ? escapeHtml(fullText) : (isCancelled ? 'Lemondva' : '')}">
                                                                     ${escapeHtml(room.name)}
-                                                                    ${isBooked ? `<span class="${isRecurringMatch ? 'text-yellow-700' : 'text-red-700'} font-medium"> (${displayName}${isRecurringMatch ? '<span class="recurring-indicator">(R)</span>' : ''})</span>` : (isCancelled ? '<span class="text-gray-500 italic">(Lemondva)</span>' : '')}
+                                                                    ${isBooked ? `<span class="${isRecurringMatch ? 'text-yellow-700' : 'text-red-700'} font-medium"> (${displayName}${isRecurringMatch ? `<svg class="recurring-indicator-icon inline-block align-middle" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M15.312 11.34a7.5 7.5 0 11-8.625-8.625l1.438 1.437a5.502 5.502 0 006.188 6.188l1 1zm-1.875-1.875a5.502 5.502 0 00-6.188-6.188l-1-1a7.5 7.5 0 118.625 8.625l-1.438-1.437z" clip-rule="evenodd" /></svg>` : ''})</span>` : (isCancelled ? '<span class="text-gray-500 italic">(Lemondva)</span>' : '')}
                                                                 </span>
                                                                 ${canBook ? `
                                                                     <button
@@ -1070,7 +1069,7 @@
                     console.log("All initial PUBLIC Firestore data loaded or errored.");
                     initialPublicDataLoaded = true;
                     loadingView.classList.add('hidden');
-                    handleRouteChange(); // Kezdeti útvonal beállítása
+                    handleRouteChange();
                 }
             }
 
@@ -1213,7 +1212,7 @@
                 type: isRecurring ? 'recurring' : 'single',
                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
             };
-            console.log("Attempting to save booking with data:", dataToSave); // Logolás
+            console.log("Attempting to save booking with data:", dataToSave);
 
             try {
                 await firestore.collection('bookings').add(dataToSave);
@@ -1528,14 +1527,14 @@
         }
 
         // --- Foglalás Részletei Popup ---
-        function showBookingDetails(bookingId) {
+        function showBookingDetails(bookingId, isRecurringMatch = false) { // Pass isRecurringMatch
             const booking = bookings.find(b => b.id === bookingId);
             if (!booking) return;
 
             const room = rooms.find(r => r.id === booking.roomId);
             const userDisplay = booking.user || 'Ismeretlen';
             const commentDisplay = booking.comment || 'Nincs megjegyzés';
-            const typeDisplay = booking.type === 'recurring' ? 'Rendszeres' : 'Egyszeri';
+            const typeDisplay = isRecurringMatch ? 'Rendszeres' : 'Egyszeri'; // Use the passed flag
             const dateDisplay = booking.date ? formatFullDate(new Date(booking.date + 'T00:00:00')) : 'Minden héten';
 
             bookingDetailsContent.innerHTML = `
@@ -1545,6 +1544,24 @@
                 <p><span class="font-semibold">Megjegyzés:</span> ${escapeHtml(commentDisplay)}</p>
                 <p><span class="font-semibold">Típus:</span> ${typeDisplay}</p>
             `;
+
+            // Törlés gomb hozzáadása, ha jogosult
+            bookingDetailsActions.innerHTML = ''; // Előző gombok törlése
+             const canDelete = currentUser && (currentUser.isAdmin || (currentUser.uid === booking.userId && booking.type === 'single'));
+             if (canDelete) {
+                 const deleteButton = document.createElement('button');
+                 deleteButton.textContent = 'Foglalás Törlése';
+                 deleteButton.className = 'px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition duration-150';
+                 deleteButton.onclick = () => {
+                     closeBookingDetailsModal();
+                     // A dayDisplay itt a teljes dátumot kell tartalmazza, ha nem rendszeres
+                     const dayForDelete = booking.date ? `${booking.day} (${formatShortDate(new Date(booking.date + 'T00:00:00'))})` : booking.day;
+                     deleteBooking(booking.id, room?.name || 'Ismeretlen terem', dayForDelete, booking.timeSlot, booking.user, isRecurringMatch);
+                 };
+                 bookingDetailsActions.appendChild(deleteButton);
+            }
+
+
             bookingDetailsModal.classList.add('active');
             requestAnimationFrame(() => { bookingDetailsModal.querySelector('.modal-content').classList.add('modal-enter-active'); });
         }
