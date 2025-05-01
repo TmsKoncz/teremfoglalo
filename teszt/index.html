@@ -17,13 +17,13 @@
         .modal-overlay.active { opacity: 1; pointer-events: auto; }
         .modal-content { background-color: white; padding: 1.5rem; border-radius: 0.5rem; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05); transform: scale(0.95); transition: transform 300ms ease-in-out; max-width: 500px; width: 100%; }
         .modal-overlay.active .modal-content { transform: scale(1); }
-        .hidden { display: none !important; } /* Important a felülíráshoz */
+        .hidden { display: none !important; }
         #admin-action-overlay { position: absolute; inset: 0; background-color: rgba(255, 255, 255, 0.75); display: flex; justify-content: center; align-items: center; z-index: 20; }
-        #admin-action-overlay.hidden { display: none; } /* Explicit elrejtés */
+        #admin-action-overlay.hidden { display: none; }
         #admin-action-overlay .spinner { width: 24px; height: 24px; }
         .view-loading::after { content: 'Adatok betöltése...'; display: block; text-align: center; padding: 2rem; color: #6b7280; font-style: italic; }
         .book-button-disabled { cursor: not-allowed; opacity: 0.5; }
-        .recurring-indicator { font-weight: bold; color: #ca8a04; margin-left: 2px; }
+        .recurring-indicator { font-weight: bold; color: #ca8a04; /* yellow-600 */ margin-left: 2px; }
         /* Header elrejtése */
         body.no-header #app-header { display: none; }
         body.no-header #main-content { margin-top: 0; padding-top: 0; }
@@ -47,7 +47,6 @@
             display: flex;
             align-items: center;
         }
-        /* Aktív idősáv kiemelése (Terem nézet) */
         .room-view-card-list .timeslot-box.active {
             transform: scale(1.05);
             box-shadow: 0 0 15px rgba(79, 70, 229, 0.4);
@@ -56,7 +55,6 @@
             z-index: 10;
             min-height: 5rem;
         }
-        /* Következő óra kiemelése (Terem nézet) */
         .room-view-card-list .timeslot-box.next-up {
             background-color: #f0f9ff; /* sky-50 */
             border-left-color: #7dd3fc; /* sky-300 */
@@ -101,7 +99,12 @@
          /* Heti nézet cella tartalom */
          .weekly-booking-details { cursor: pointer; }
          .weekly-booking-details:hover { background-color: rgba(239, 246, 255, 0.5); } /* blue-50/50 */
-
+         /* Admin hirdetmény sáv */
+         #announcement-bar {
+             background-color: #fffbeb; /* yellow-50 */
+             color: #ca8a04; /* yellow-600 */
+             border: 1px solid #fef3c7; /* yellow-200 */
+         }
     </style>
 </head>
 <body class="bg-gray-100 font-sans">
@@ -120,6 +123,10 @@
             </nav>
         </div>
     </header>
+
+    <div id="announcement-bar" class="hidden container mx-auto mt-2 p-3 text-center text-sm rounded shadow">
+        <span id="announcement-message"></span>
+    </div>
 
     <main id="main-content" class="container mx-auto mt-4 pb-16">
         <div id="loading-view" class="flex flex-col justify-center items-center h-64 text-xl text-gray-600">
@@ -230,6 +237,8 @@
         let bookings = [];
         let allowedUsers = [];
         let pendingUsers = [];
+        let cancellations = []; // Új: Lemondások tárolása
+        let announcement = ""; // Új: Admin üzenet
         let currentView = 'loading';
         let currentRoomId = null;
         let unsubscribePublicListeners = [];
@@ -257,6 +266,8 @@
         const userStatusDiv = document.getElementById('user-status');
         const navLinksDiv = document.getElementById('nav-links');
         const mainContent = document.getElementById('main-content');
+        const announcementBar = document.getElementById('announcement-bar'); // Új
+        const announcementMessageSpan = document.getElementById('announcement-message'); // Új
         const bookingModalElement = document.getElementById('booking-modal');
         const modalRoomName = document.getElementById('modal-room-name');
         const modalDay = document.getElementById('modal-day');
@@ -359,7 +370,6 @@
             const urlRoomNameParam = params.get('id');
             console.log("Current hash:", hash, "URL param 'id':", urlRoomNameParam);
 
-            // Várjuk meg, amíg az auth state biztosan beállítódik
             if (currentUser === undefined) {
                 console.log("Routing skipped: Waiting for auth state...");
                 if (authStatePromise) {
@@ -403,7 +413,7 @@
                  navigateTo('#/');
                  return;
             } else if (hash === '#/admin') {
-                if (currentUser?.isAdmin) { // Itt már biztosan tudjuk az admin státuszt
+                if (currentUser?.isAdmin) {
                     targetView = 'admin';
                     if (unsubscribeAdminListeners.length === 0) {
                         setupAdminFirestoreListeners();
@@ -480,6 +490,8 @@
                         renderView();
                     }
                  }
+                 // Admin üzenet megjelenítése
+                 displayAnnouncement();
 
             } else {
                  if (currentUser !== undefined) {
@@ -492,6 +504,8 @@
                     unsubscribeAdminFirestoreListeners();
                     allowedUsers = [];
                     pendingUsers = [];
+                    // Admin üzenet elrejtése
+                    announcementBar.classList.add('hidden');
                     if (currentView === 'admin') {
                         navigateTo('#/');
                     } else if (initialPublicDataLoaded && currentView !== 'loading' && currentView !== 'error') {
@@ -536,7 +550,7 @@
                  console.error(`Render failed: View element ${currentView}-view not found.`);
                  return;
             }
-            viewElement.classList.add('view-loading');
+            viewElement.classList.add('view-loading'); // Add loading class before render
 
             try {
                 switch (currentView) {
@@ -549,7 +563,7 @@
                         break;
                     default: navigateTo('#/');
                 }
-                viewElement.classList.remove('view-loading');
+                viewElement.classList.remove('view-loading'); // Remove loading class after render
             } catch (error) {
                 console.error(`Error rendering view ${currentView}:`, error);
                 showError(`Hiba történt a(z) ${currentView} nézet megjelenítésekor: ${error.message}`);
@@ -560,7 +574,7 @@
         /** Heti nézet táblázatának generálása és megjelenítése */
         function renderWeeklyView() {
             console.log("Rendering Weekly View for date:", formatDateYYYYMMDD(currentMonday));
-            weeklyViewDiv.innerHTML = '';
+            weeklyViewDiv.innerHTML = ''; // Clear previous content
 
             const weekDates = getWeekDates(currentMonday);
             const weekDateStrings = weekDates.map(formatDateYYYYMMDD);
@@ -568,6 +582,8 @@
             const sortedRooms = [...rooms].sort((a, b) => a.name.localeCompare(b.name));
             const singleBookingsThisWeek = bookings.filter(b => b.date && weekDateStrings.includes(b.date) && b.type === 'single');
             const recurringBookingTemplates = bookings.filter(b => b.type === 'recurring');
+            // Szűrjük a lemondásokat az aktuális hétre
+            const cancellationsThisWeek = cancellations.filter(c => weekDateStrings.includes(c.date));
 
             let tableHTML = `
                 <div class="flex justify-between items-center mb-4">
@@ -601,25 +617,41 @@
                                                     ${sortedRooms.map(room => {
                                                         let booking = singleBookingsThisWeek.find(b => b.roomId === room.id && b.date === dateString && b.timeSlot === slot.value);
                                                         let isRecurringMatch = false;
+                                                        let isCancelled = false;
+                                                        let recurringBookingId = null; // ID a lemondáshoz
+
                                                         if (!booking) {
-                                                            booking = recurringBookingTemplates.find(b => b.roomId === room.id && b.day === dayName && b.timeSlot === slot.value);
-                                                            if (booking) isRecurringMatch = true;
+                                                            const recurringBooking = recurringBookingTemplates.find(b => b.roomId === room.id && b.day === dayName && b.timeSlot === slot.value);
+                                                            if (recurringBooking) {
+                                                                // Ellenőrizzük, hogy le van-e mondva erre a napra
+                                                                isCancelled = cancellationsThisWeek.some(c => c.recurringBookingId === recurringBooking.id && c.date === dateString);
+                                                                if (!isCancelled) {
+                                                                    booking = recurringBooking; // Csak akkor vesszük figyelembe, ha nincs lemondva
+                                                                    isRecurringMatch = true;
+                                                                    recurringBookingId = booking.id; // Eltároljuk az eredeti ID-t
+                                                                }
+                                                            }
                                                         }
+
                                                         const isBooked = !!booking;
-                                                        const canDelete = currentUser && booking && (currentUser.uid === booking.userId || currentUser.isAdmin);
-                                                        const canBook = !isBooked;
+                                                        // Törlési jog: Admin bármit, user csak a saját egyszeri foglalását
+                                                        const canDelete = currentUser && booking && (currentUser.isAdmin || (currentUser.uid === booking.userId && booking.type === 'single'));
+                                                        // Lemondási jog: Csak bejelentkezett user, csak a hozzá rendelt rendszeres foglalás adott napi előfordulását, amit nem ő hozott létre
+                                                        const canCancelInstance = currentUser && isRecurringMatch && booking.userId === currentUser.uid && !currentUser.isAdmin; // Feltételezve, hogy admin nem mond le user helyett példányt
+                                                        const canBook = !isBooked && !isCancelled; // Foglalni akkor lehet, ha nincs foglalás és nincs lemondva
+
+                                                        // Megjelenítendő szöveg kezelése
                                                         const displayUser = booking?.user || '';
                                                         const displayComment = booking?.comment || '';
-                                                        // Egyszerűsített megjelenítés, ha túl hosszú lenne
                                                         const fullText = displayUser + (displayComment ? ` (${displayComment})` : '');
                                                         const displayName = fullText.length > 25 ? `${displayUser.split(' ')[0]}...` : fullText;
 
                                                         return `
                                                             <li class="flex items-center space-x-1.5 text-xs group relative">
-                                                                <span class="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0 ${isBooked ? 'bg-red-500' : 'bg-green-500'}" title="${isBooked ? 'Foglalt' : 'Szabad'}"></span>
-                                                                <span class="flex-grow overflow-hidden overflow-ellipsis whitespace-nowrap ${isBooked ? 'text-gray-700' : 'text-gray-500'} weekly-booking-details" ${isBooked ? `onclick="showBookingDetails('${booking.id}')"` : ''} title="${isBooked ? escapeHtml(fullText) : ''}">
+                                                                <span class="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0 ${isBooked ? 'bg-red-500' : (isCancelled ? 'bg-gray-400' : 'bg-green-500')}" title="${isBooked ? 'Foglalt' : (isCancelled ? 'Lemondva' : 'Szabad')}"></span>
+                                                                <span class="flex-grow overflow-hidden overflow-ellipsis whitespace-nowrap ${isBooked ? 'text-gray-700' : 'text-gray-500'} ${isCancelled ? 'line-through text-gray-400' : ''} weekly-booking-details" ${isBooked ? `onclick="showBookingDetails('${booking.id}')"` : ''} title="${isBooked ? escapeHtml(fullText) : (isCancelled ? 'Lemondva' : '')}">
                                                                     ${escapeHtml(room.name)}
-                                                                    ${isBooked ? `<span class="text-red-700 font-medium"> (${displayName}${isRecurringMatch ? '<span class="recurring-indicator">(R)</span>' : ''})</span>` : ''}
+                                                                    ${isBooked ? `<span class="${isRecurringMatch ? 'text-yellow-700' : 'text-red-700'} font-medium"> (${displayName}${isRecurringMatch ? '<span class="recurring-indicator">(R)</span>' : ''})</span>` : (isCancelled ? '<span class="text-gray-500 italic">(Lemondva)</span>' : '')}
                                                                 </span>
                                                                 ${canBook ? `
                                                                     <button
@@ -630,11 +662,19 @@
                                                                         Foglal
                                                                     </button>
                                                                 ` : ''}
+                                                                 ${canCancelInstance ? `
+                                                                    <button
+                                                                        onclick="cancelRecurringInstance('${recurringBookingId}', '${dateString}', '${escapeJsString(room.name)}', '${dayName} (${dateString})', '${escapeJsString(slot.value)}')"
+                                                                        class="ml-1 text-orange-600 hover:text-orange-800 text-[10px] font-semibold px-1 py-0.5 rounded hover:bg-orange-50 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                                        title="Egyszeri lemondás erre a napra">
+                                                                        Lemond
+                                                                    </button>
+                                                                ` : ''}
                                                                 ${isBooked && canDelete ? `
                                                                     <button
                                                                         onclick="deleteBooking('${booking.id}', '${escapeJsString(room.name)}', '${dayName} (${dateString})', '${escapeJsString(slot.value)}', '${escapeJsString(booking.user)}', ${isRecurringMatch})"
                                                                         class="ml-1 text-red-500 hover:text-red-800 text-[10px] font-semibold px-1 py-0.5 rounded hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-opacity"
-                                                                        title="Foglalás Törlése ${isRecurringMatch ? '(Rendszeres!)' : ''}">
+                                                                        title="Foglalás Törlése ${isRecurringMatch ? '(Teljes Rendszeres!)' : ''}">
                                                                         X
                                                                     </button>
                                                                 ` : ''}
@@ -667,15 +707,23 @@
              const todayBookingsMap = new Map();
              const sortedTimeSlots = [...timeSlots].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
              const sortedRooms = [...rooms].sort((a, b) => a.name.localeCompare(b.name));
+             const todayCancellations = cancellations.filter(c => c.date === todayDateString);
 
              sortedRooms.forEach(room => {
                  sortedTimeSlots.forEach(slot => {
                      let booking = bookings.find(b => b.roomId === room.id && b.date === todayDateString && b.timeSlot === slot.value && b.type === 'single');
+                     let isCancelled = false;
                      if (!booking) {
-                         booking = bookings.find(b => b.roomId === room.id && b.day === today && b.timeSlot === slot.value && b.type === 'recurring');
+                         const recurringBooking = bookings.find(b => b.roomId === room.id && b.day === today && b.timeSlot === slot.value && b.type === 'recurring');
+                         if (recurringBooking) {
+                             isCancelled = todayCancellations.some(c => c.recurringBookingId === recurringBooking.id);
+                             if (!isCancelled) {
+                                 booking = recurringBooking;
+                             }
+                         }
                      }
                      if (booking) {
-                         todayBookingsMap.set(`${room.id}-${slot.value}`, booking);
+                         todayBookingsMap.set(`${room.id}-${slot.value}`, { ...booking, isCancelled: isCancelled }); // Store cancellation status
                      }
                  });
              });
@@ -707,16 +755,18 @@
                                 <ul class="divide-y divide-gray-200">`;
 
                         sortedTimeSlots.forEach((slot, index) => {
-                            const booking = todayBookingsMap.get(`${room.id}-${slot.value}`);
+                            const bookingData = todayBookingsMap.get(`${room.id}-${slot.value}`);
+                            const booking = bookingData?.isCancelled ? null : bookingData; // Ha lemondva, null-ként kezeljük
+                            const isCancelled = bookingData?.isCancelled ?? false;
                             const isActive = slot.value === currentTimeSlotValue;
                             const isBooked = !!booking;
-                            const displayUser = booking?.user || 'Szabad';
+                            const displayUser = booking?.user || (isCancelled ? 'Lemondva' : 'Szabad');
                             const displayComment = booking?.comment || '';
 
                             summaryHTML += `
-                                <li class="timeslot-box py-2 flex justify-between items-center ${isActive ? 'active bg-indigo-50 font-semibold' : ''}" data-timeslot="${escapeHtml(slot.value)}">
+                                <li class="timeslot-box py-2 flex justify-between items-center ${isActive ? 'active bg-indigo-50 font-semibold' : ''} ${isCancelled ? 'opacity-60' : ''}" data-timeslot="${escapeHtml(slot.value)}">
                                     <div class="flex-grow"> <span class="font-medium text-gray-800">${escapeHtml(slot.value)}</span>
-                                        <span class="ml-2 text-gray-600"> - ${escapeHtml(displayUser)}</span>
+                                        <span class="ml-2 ${isBooked ? 'text-gray-600' : 'text-green-600'} ${isCancelled ? '!text-gray-400 italic' : ''}"> - ${escapeHtml(displayUser)}</span>
                                         ${displayComment ? `<span class="ml-2 text-gray-500 italic">(${escapeHtml(displayComment)})</span>` : ''}
                                         ${isBooked ? `<span class="booking-type-badge">${booking.type === 'recurring' ? 'Rendszeres' : 'Egyszeri'}</span>` : ''}
                                     </div>
@@ -746,15 +796,23 @@
             const sortedTimeSlots = [...timeSlots].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
             const currentTimeSlotValue = getCurrentTimeSlot(timeSlots);
             const nextTimeSlotValue = !currentTimeSlotValue ? getNextTimeSlot(timeSlots) : null;
+            const todayCancellations = cancellations.filter(c => c.date === todayDateString);
 
             const roomBookingsTodayMap = new Map();
             sortedTimeSlots.forEach(slot => {
                 let booking = bookings.find(b => b.roomId === room.id && b.date === todayDateString && b.timeSlot === slot.value && b.type === 'single');
+                let isCancelled = false;
                 if (!booking) {
-                    booking = bookings.find(b => b.roomId === room.id && b.day === today && b.timeSlot === slot.value && b.type === 'recurring');
+                    const recurringBooking = bookings.find(b => b.roomId === room.id && b.day === today && b.timeSlot === slot.value && b.type === 'recurring');
+                    if (recurringBooking) {
+                        isCancelled = todayCancellations.some(c => c.recurringBookingId === recurringBooking.id);
+                        if (!isCancelled) {
+                            booking = recurringBooking;
+                        }
+                    }
                 }
-                if (booking) {
-                    roomBookingsTodayMap.set(slot.value, booking);
+                if (booking || isCancelled) { // Akkor is tároljuk, ha csak lemondás van
+                    roomBookingsTodayMap.set(slot.value, { booking: booking, isCancelled: isCancelled });
                 }
             });
 
@@ -771,26 +829,29 @@
             if (sortedTimeSlots.length === 0) {
                  roomHTML += `<p class="text-center text-gray-500 mt-10 text-lg px-4">Nincsenek elérhető idősávok definiálva ehhez a teremhez.</p>`;
             } else {
-                // Szélesebb konténer
                 roomHTML += `<div class="max-w-2xl mx-auto px-1 sm:px-2"><ul class="space-y-2 room-view-card-list">`;
                 let hasAnyBookingOrCurrentSlot = false;
                 sortedTimeSlots.forEach((slot, index) => {
-                     const booking = roomBookingsTodayMap.get(slot.value);
+                     const bookingData = roomBookingsTodayMap.get(slot.value);
+                     const booking = bookingData?.booking;
+                     const isCancelled = bookingData?.isCancelled ?? false;
                      const isActive = slot.value === currentTimeSlotValue;
                      const isNext = slot.value === nextTimeSlotValue;
-                     if (booking || isActive || isNext) hasAnyBookingOrCurrentSlot = true;
+                     if (booking || isActive || isNext || isCancelled) hasAnyBookingOrCurrentSlot = true;
 
                      const isBooked = !!booking;
                      const typeText = isBooked ? (booking.type === 'recurring' ? 'Rendszeres' : 'Egyszeri') : '';
-                     const userText = isBooked ? escapeHtml(booking.user) : 'SZABAD';
+                     const userText = isBooked ? escapeHtml(booking.user) : (isCancelled ? 'LEMONDVA' : 'SZABAD');
                      const commentText = isBooked ? escapeHtml(booking.comment || '') : '';
 
-                     // Osztályok összeállítása
-                     let liClasses = `timeslot-box border-l-4 ${isBooked ? 'border-red-500' : 'border-green-500'} bg-white p-4 rounded-lg shadow-md relative`; // Vékony szegély, p-4 padding
+                     let liClasses = `timeslot-box border-l-4 ${isBooked ? 'border-red-500' : (isCancelled ? 'border-gray-400' : 'border-green-500')} bg-white p-4 rounded-lg shadow-md relative`;
                      if (isActive) {
                          liClasses += ' active bg-indigo-100 border-indigo-700';
                      } else if (isNext) {
                          liClasses += ' next-up bg-sky-50 border-sky-300';
+                     }
+                     if (isCancelled) {
+                         liClasses += ' opacity-70'; // Enyhe áttetszőség a lemondott óráknál
                      }
 
                      roomHTML += `
@@ -801,7 +862,7 @@
                                     ${isActive ? `<span class="status-indicator active">MOST</span>` : ''}
                                     ${isNext ? `<span class="status-indicator next">KÖVETKEZIK</span>` : ''}
                                 </div>
-                                <div class="text-gray-700 text-base">
+                                <div class="text-base ${isBooked ? 'text-gray-700' : 'text-green-600'} ${isCancelled ? '!text-gray-500 italic' : ''}">
                                     ${userText}
                                     ${isBooked ? `<span class="booking-type-badge">${typeText}</span>` : ''}
                                 </div>
@@ -834,6 +895,13 @@
                 <div class="p-4 md:p-6 bg-white rounded-lg shadow space-y-8 relative">
                      <div id="admin-action-overlay" class="hidden"><div class="spinner"></div> <span class="ml-3 text-gray-700">Folyamatban...</span></div>
                     <h2 class="text-2xl font-bold text-center text-indigo-700">Adminisztrációs Felület</h2>
+                    <section>
+                        <h3 class="text-xl font-semibold mb-3 text-gray-800 border-b pb-2">Hirdetmény/Üzenet a Főoldalra</h3>
+                        <textarea id="admin-announcement" class="admin-input w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" rows="3" placeholder="Írj ide egy rövid üzenetet... (üresen hagyva törlődik)">${escapeHtml(announcement)}</textarea>
+                        <div class="text-right mt-2">
+                             <button id="save-announcement-button" data-action="save-announcement" class="admin-action-button px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition duration-150">Üzenet Mentése</button>
+                        </div>
+                    </section>
                     <section>
                         <h3 class="text-xl font-semibold mb-3 text-gray-800 border-b pb-2">Termek Kezelése</h3>
                         <ul id="admin-rooms-list" class="space-y-2 mb-4 max-h-60 overflow-y-auto border rounded p-2">${rooms.length === 0 ? '<li class="text-gray-500 italic">Nincsenek termek.</li>' : [...rooms].sort((a, b) => a.name.localeCompare(b.name)).map(room => `<li data-id="${room.id}" class="flex justify-between items-center p-2 border-b last:border-b-0"><span>${escapeHtml(room.name)}</span><button data-action="delete-room" class="admin-action-button text-red-600 hover:text-red-800 text-sm font-semibold px-2 py-1 rounded hover:bg-red-50">Törlés</button></li>`).join('')}</ul>
@@ -994,7 +1062,7 @@
             console.log("Setting up PUBLIC Firestore listeners...");
             unsubscribePublicListeners = [];
             initialPublicDataLoaded = false;
-            let listenersPending = 3;
+            let listenersPending = 4; // rooms, timeSlots, bookings, announcement
 
             function checkInitialLoadComplete() {
                 listenersPending--;
@@ -1019,6 +1087,39 @@
                 const bookingsRef = firestore.collection('bookings');
                  const unsubBookings = bookingsRef.onSnapshot((snapshot) => { bookings = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); console.log("Public Bookings updated:", bookings.length); checkInitialLoadComplete(); if (initialPublicDataLoaded) renderView(); }, (error) => { console.error("Error fetching public bookings:", error); showError("Hiba a foglalások betöltésekor."); checkInitialLoadComplete(); });
                 unsubscribePublicListeners.push(unsubBookings);
+
+                 // Listener for cancellations
+                 const cancellationsRef = firestore.collection('cancellations');
+                 const unsubCancellations = cancellationsRef.onSnapshot((snapshot) => {
+                     cancellations = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                     console.log("Public Cancellations updated:", cancellations.length);
+                     // Nincs checkInitialLoadComplete itt, mert ez nem blokkolja az alapvető megjelenítést
+                     if (initialPublicDataLoaded) renderView(); // Újrarajzolás, ha már betöltött
+                 }, (error) => {
+                     console.error("Error fetching cancellations:", error);
+                     // Nem állítjuk le az egészet, ha a lemondások nem töltődnek be
+                 });
+                 unsubscribePublicListeners.push(unsubCancellations);
+
+                 // Listener for announcement
+                 const announcementRef = firestore.collection('config').doc('announcement');
+                 const unsubAnnouncement = announcementRef.onSnapshot((doc) => {
+                     if (doc.exists) {
+                         announcement = doc.data().message || "";
+                     } else {
+                         announcement = "";
+                     }
+                     console.log("Announcement updated:", announcement);
+                     checkInitialLoadComplete();
+                     if (initialPublicDataLoaded) displayAnnouncement(); // Üzenet frissítése
+                 }, (error) => {
+                     console.error("Error fetching announcement:", error);
+                     announcement = ""; // Hiba esetén nincs üzenet
+                     checkInitialLoadComplete();
+                     if (initialPublicDataLoaded) displayAnnouncement();
+                 });
+                 unsubscribePublicListeners.push(unsubAnnouncement);
+
 
             } catch (error) {
                  console.error("Error setting up public Firestore listeners:", error);
@@ -1065,7 +1166,7 @@
             modalDay.textContent = day;
             modalDate.textContent = formatShortDate(new Date(dateString + 'T00:00:00'));
             modalTimeslot.textContent = timeSlot;
-            modalBookingUserInput.value = currentUser.nickname || currentUser.displayName || ''; // Nickname vagy Google név
+            modalBookingUserInput.value = currentUser.nickname || currentUser.displayName || '';
             modalBookingCommentInput.value = '';
             modalIsRecurringCheckbox.checked = false;
             modalRecurringOptionDiv.classList.toggle('hidden', !currentUser.isAdmin);
@@ -1115,14 +1216,13 @@
             const isRecurring = modalIsRecurringCheckbox.checked && currentUser.isAdmin;
 
             let targetUserId = currentUser.uid;
-            let targetUserName = bookingPurpose; // A beírt név/cél lesz a foglalás 'user' mezője
+            let targetUserName = bookingPurpose;
 
             if (currentUser.isAdmin && modalUserSelector.value !== currentUser.uid) {
                 targetUserId = modalUserSelector.value;
                 console.log(`Admin booking for user: ${targetUserId} with name/purpose: ${targetUserName}`);
             } else {
                  targetUserId = currentUser.uid;
-                 // Ha saját magának foglal, és nem írt be nevet, használjuk a nicknevét/Google nevét
                  if (!targetUserName) targetUserName = currentUser.nickname || currentUser.displayName || '';
                  console.log(`User booking for self: ${targetUserId} (${targetUserName})`);
             }
@@ -1136,7 +1236,7 @@
                     date: isRecurring ? null : bookingDataForModal.date,
                     userId: targetUserId,
                     user: targetUserName,
-                    comment: bookingComment || null, // Megjegyzés mentése
+                    comment: bookingComment || null,
                     type: isRecurring ? 'recurring' : 'single',
                     createdAt: firebase.firestore.FieldValue.serverTimestamp()
                 });
@@ -1156,29 +1256,69 @@
             modalConfirmText.textContent = isLoading ? 'Mentés...' : 'Foglalás Mentése';
         }
 
-        // --- Foglalás Törlése ---
+        // --- Foglalás Törlése / Lemondása ---
         async function deleteBooking(bookingId, roomName, dayDisplay, timeSlot, bookedBy, isRecurring = false) {
               if (!currentUser || !firestore) { showLoginPopup("A törléshez bejelentkezés szükséges."); return; }
              const booking = bookings.find(b => b.id === bookingId);
              if (!booking) { showCustomAlert("A foglalás nem található.", "Hiba"); return; }
+             // Jogosultság ellenőrzése: Csak az törölheti, akihez rendelve van, VAGY admin.
              if (currentUser.uid !== booking.userId && !currentUser.isAdmin) {
                  showCustomAlert("Nincs jogosultságod ennek a foglalásnak a törléséhez.", "Hiba");
                  return;
              }
-             // Ha nem admin, és rendszeres foglalást próbál törölni
-             if (!currentUser.isAdmin && booking.type === 'recurring') {
-                  showCustomAlert("Rendszeres foglalást csak adminisztrátor törölhet.", "Hiba");
-                  return;
+             // Rendszeres foglalást csak admin törölhet teljesen
+             if (isRecurring && !currentUser.isAdmin) {
+                 showCustomAlert("Rendszeres foglalást csak adminisztrátor törölhet teljesen. Az 'Egyszeri lemondás' gombbal tudod az aktuális hetet lemondani.", "Hiba");
+                 return;
              }
-             const confirmationMessage = `Biztosan törölni szeretnéd ezt a foglalást?\nTerem: ${roomName}\nIdőpont: ${dayDisplay} ${timeSlot}\nFoglaló: ${bookedBy}` + (isRecurring ? "\n\nFIGYELEM: Ez egy rendszeres foglalás törlése, ami minden hétről eltávolítja!" : "");
+
+             const confirmationMessage = `Biztosan törölni szeretnéd ezt a foglalást?\nTerem: ${roomName}\nIdőpont: ${dayDisplay} ${timeSlot}\nFoglaló: ${bookedBy}` + (isRecurring ? "\n\nFIGYELEM: Ez egy RENDSZERES foglalás törlése, ami minden hétről eltávolítja!" : "");
              const confirmed = await showCustomConfirm(confirmationMessage, "Megerősítés");
              if (confirmed) {
                  console.log(`Deleting booking: ${bookingId} (Recurring: ${isRecurring})`);
                  try {
                      await firestore.collection('bookings').doc(bookingId).delete();
+                     // TODO: Ha rendszeres volt, a hozzá tartozó lemondásokat is törölni kellene a 'cancellations' kollekcióból
                      showCustomAlert("Foglalás sikeresen törölve.");
                  } catch (error) { console.error("Error deleting booking:", error); showCustomAlert(`Hiba történt a foglalás törlésekor: ${error.message}`, "Hiba"); }
              } else { console.log("Deletion cancelled by user."); }
+        }
+
+        /** Rendszeres foglalás egy adott napi előfordulásának lemondása */
+        async function cancelRecurringInstance(recurringBookingId, dateString, roomName, dayDisplay, timeSlot) {
+            if (!currentUser || !firestore) { showLoginPopup("A lemondáshoz bejelentkezés szükséges."); return; }
+            const booking = bookings.find(b => b.id === recurringBookingId);
+            // Csak a felhasználó mondhatja le a sajátjának jelölt rendszeres foglalást
+            if (!booking || booking.userId !== currentUser.uid) {
+                 showCustomAlert("Csak a saját nevedre szóló rendszeres foglalást mondhatod le.", "Hiba");
+                 return;
+            }
+
+            const confirmationMessage = `Biztosan lemondod a foglalást erre a napra?\nTerem: ${roomName}\nIdőpont: ${dayDisplay} ${timeSlot}`;
+            const confirmed = await showCustomConfirm(confirmationMessage, "Lemondás megerősítése");
+
+            if (confirmed) {
+                console.log(`Cancelling instance of recurring booking: ${recurringBookingId} for date: ${dateString}`);
+                try {
+                    // Létrehozunk egy új dokumentumot a 'cancellations' kollekcióban
+                    // Az ID lehetne pl. bookingId_dateString a könnyebb kereséshez/ütközéshez
+                    const cancellationRef = firestore.collection('cancellations').doc(`${recurringBookingId}_${dateString}`);
+                    await cancellationRef.set({
+                        recurringBookingId: recurringBookingId,
+                        date: dateString,
+                        cancelledByUid: currentUser.uid,
+                        cancelledByName: currentUser.nickname || currentUser.displayName || currentUser.email,
+                        cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                    showCustomAlert("Foglalás erre a napra sikeresen lemondva.");
+                    // A listener frissíti a UI-t
+                } catch (error) {
+                    console.error("Error cancelling recurring instance:", error);
+                    showCustomAlert(`Hiba történt a lemondáskor: ${error.message}`, "Hiba");
+                }
+            } else {
+                console.log("Cancellation cancelled by user.");
+            }
         }
 
         // --- Admin Műveletek ---
@@ -1268,26 +1408,19 @@
         async function editUser(userId, currentEmail, currentNickname) { // Allowed user szerkesztése
             if (!currentUser?.isAdmin || !firestore) return showCustomAlert("Nincs jogosultságod.", "Hiba");
             const newNickname = prompt(`Add meg "${currentEmail}" új megjelenítendő nevét (üresen hagyva törli):`, currentNickname || '');
-            if (newNickname === null) return; // Mégse gomb
+            if (newNickname === null) return;
             setAdminLoading(true);
-            try {
-                await firestore.collection('allowedUsers').doc(userId).update({ nickname: newNickname.trim() || null });
-                showCustomAlert(`"${currentEmail}" megjelenítendő neve frissítve.`);
-            } catch (error) { showCustomAlert(`Hiba a név frissítésekor: ${error.message}`, "Hiba"); }
-            finally { setAdminLoading(false); }
+            try { await firestore.collection('allowedUsers').doc(userId).update({ nickname: newNickname.trim() || null }); showCustomAlert(`"${currentEmail}" megjelenítendő neve frissítve.`); }
+            catch (error) { showCustomAlert(`Hiba a név frissítésekor: ${error.message}`, "Hiba"); } finally { setAdminLoading(false); }
         }
         async function editPendingUser(email, currentNickname, currentIsAdmin) { // Pending user szerkesztése
             if (!currentUser?.isAdmin || !firestore) return showCustomAlert("Nincs jogosultságod.", "Hiba");
             const newNickname = prompt(`Add meg "${email}" új megjelenítendő nevét (üresen hagyva törli):`, currentNickname || '');
             if (newNickname === null) return;
             const newIsAdmin = confirm(`Legyen "${email}" adminisztrátor? (Jelenlegi: ${currentIsAdmin ? 'Igen' : 'Nem'})`);
-
             setAdminLoading(true);
-            try {
-                await firestore.collection('pendingUsers').doc(email).update({ nickname: newNickname.trim() || null, isAdmin: newIsAdmin });
-                showCustomAlert(`"${email}" meghívott adatai frissítve.`);
-            } catch (error) { showCustomAlert(`Hiba a meghívott adatainak frissítésekor: ${error.message}`, "Hiba"); }
-            finally { setAdminLoading(false); }
+            try { await firestore.collection('pendingUsers').doc(email).update({ nickname: newNickname.trim() || null, isAdmin: newIsAdmin }); showCustomAlert(`"${email}" meghívott adatai frissítve.`); }
+            catch (error) { showCustomAlert(`Hiba a meghívott adatainak frissítésekor: ${error.message}`, "Hiba"); } finally { setAdminLoading(false); }
         }
         function setAdminLoading(isLoading) {
               const overlay = document.getElementById('admin-action-overlay');
@@ -1303,6 +1436,22 @@
                  button.disabled = isLoading || isSelfAction;
              });
         }
+        // Admin üzenet mentése
+        async function saveAnnouncement() {
+            if (!currentUser?.isAdmin || !firestore) return showCustomAlert("Nincs jogosultságod.", "Hiba");
+            const message = document.getElementById('admin-announcement').value.trim();
+            setAdminLoading(true);
+            try {
+                await firestore.collection('config').doc('announcement').set({ message: message });
+                showCustomAlert("Hirdetmény mentve.");
+                announcement = message; // Frissítjük a globális változót is
+                displayAnnouncement(); // Azonnali megjelenítés/eltüntetés
+            } catch (error) {
+                showCustomAlert(`Hiba a hirdetmény mentésekor: ${error.message}`, "Hiba");
+            } finally {
+                setAdminLoading(false);
+            }
+        }
 
         // --- Eseményfigyelők ---
         function setupEventListeners() {
@@ -1313,6 +1462,7 @@
             modalCancelButton.addEventListener('click', closeBookingModal);
             modalConfirmButton.addEventListener('click', confirmBooking);
             bookingDetailsCloseButton.addEventListener('click', closeBookingDetailsModal);
+            // Az admin gombok figyelője delegálással kerül hozzáadásra a renderAdminView-ban
             console.log("Base event listeners attached.");
         }
 
@@ -1328,7 +1478,7 @@
             const isadmin = li?.dataset.isadmin === 'true';
             const nickname = li?.dataset.nickname;
             const nameElement = li?.querySelector('span');
-            let name = nameElement?.textContent;
+            let name = nameElement?.textContent; // Terem/Idősáv/Email/Nickname
 
             console.log("Admin action:", action, "ID:", id, "Email:", email, "IsAdmin:", isadmin, "Name:", name, "Nickname:", nickname);
 
@@ -1337,11 +1487,12 @@
             else if (action === 'toggle-admin' && id) toggleAdminStatus(id, email, isadmin);
             else if (action === 'delete-user' && id) deleteAllowedUser(id, email);
             else if (action === 'delete-pending' && email) deletePendingUser(email);
-            else if (action === 'edit-user' && id) editUser(id, email, nickname); // Szerkesztés hívása
-            else if (action === 'edit-pending' && email) editPendingUser(email, nickname, isadmin); // Pending szerkesztés hívása
+            else if (action === 'edit-user' && id) editUser(id, email, nickname);
+            else if (action === 'edit-pending' && email) editPendingUser(email, nickname, isadmin);
             else if (button.id === 'add-room-button') addRoom();
             else if (button.id === 'add-timeslot-button') addTimeSlot();
             else if (button.id === 'add-pending-user-button') addPendingUser();
+            else if (button.id === 'save-announcement-button') saveAnnouncement(); // Üzenet mentése
         }
 
         // --- Login Popup Kezelése ---
@@ -1492,6 +1643,16 @@
                     }
                 }
             }, 60000);
+        }
+
+        // --- Admin Üzenet Megjelenítése ---
+        function displayAnnouncement() {
+            if (currentUser && announcement) {
+                announcementMessageSpan.textContent = announcement;
+                announcementBar.classList.remove('hidden');
+            } else {
+                announcementBar.classList.add('hidden');
+            }
         }
 
 
